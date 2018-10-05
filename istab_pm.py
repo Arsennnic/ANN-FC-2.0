@@ -291,8 +291,7 @@ def NN_train_phase_envelope(train_data, test_data,
     plt.ylabel("Count")
     plt.show()
 
-    
-    #return Wf, bf, min_W, min_b, pred
+    return W, b
 
 def train(train_data, test_data, 
                             hidden_cells = 10, batch_size = 30, 
@@ -302,12 +301,12 @@ def train(train_data, test_data,
     #                        hidden_cells = hidden_cells, 
     #                        batch_size = batch_size, epoch = epoch, 
     #                        plot = plot, plot_name = plot_name)
-    NN_train_phase_envelope(train_data, test_data, 
+    W, b = NN_train_phase_envelope(train_data, test_data, 
                             hidden_cells = hidden_cells, 
                             batch_size = batch_size, epoch = epoch, 
                             plot = plot, plot_name = plot_name)
 
-    #return Wf, bf, min_W, min_b, pred
+    return W, b
 
 
 
