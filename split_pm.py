@@ -371,9 +371,34 @@ def plot_history(history):
     plt.show()
 
 
+class EarlyStoppingByGL(keras.callbacks.Callback):
+    def __init__(self, alpha = 0.1, min_epoch = 1000, verbose=0):
+        super(keras.callbacks.Callback, self).__init__()
+        self.min_val_loss = 1.0
+        self.min_epoch = min_epoch
+        self.verbose = verbose
+        self.alpha = alpha
+
+    def on_epoch_end(self, epoch, logs={}):
+        val_loss = logs.get('val_loss')
+
+        if self.min_val_loss > val_loss:
+            self.min_val_loss = val_loss
+
+        GL = val_loss / self.min_val_loss - 1.0
+        if (GL > self.alpha and epoch > self.min_epoch and epoch % 100 == 0):
+            #if self.verbose > 0:
+            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.3f" % (epoch, val_loss, self.min_val_loss, GL))
+            self.model.stop_training = True
+        
+        if epoch % 100 == 0:
+            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.3f" % (epoch, val_loss, self.min_val_loss, GL))
+
+
 def NN_train_phase_split_calculation(train_data, test_data, trans = None,
                                      hidden_cells = 10, batch_size = 30, 
-                                     epoch = 100, plot = True, plot_name = None):
+                                     epoch = 100, GL = 0.1, min_epoch = 1000,
+                                     plot = True, plot_name = None):
     # training featrue and target
     print("Read training data:")
     feature_scale = []
@@ -406,10 +431,23 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
 
     model.compile(loss='mse', optimizer = optimizer, metrics=['mae'])
 
+    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
+
+    filepath = './weights'
+    #filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, 
+            monitor='val_loss', verbose = 0, 
+            save_best_only=True, save_weights_only=True,
+            mode='min')
+
     history = model.fit(feature, target, batch_size = batch_size, 
-            epochs = epoch, validation_split=0.1, verbose=0)
+            epochs = epoch, validation_split=0.1, verbose=0,
+            callbacks = [earlystop, checkpoint])
 
     plot_history(history)
+
+    #model = keras.models.load_model(filepath)
+    model.load_weights(filepath)
 
     W = []
     b = []
@@ -464,12 +502,14 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
 
 def train(train_data, test_data, trans = None,
         hidden_cells = 10, batch_size = 30, 
-        epoch = 100, plot = True, plot_name = None):
+        epoch = 100, GL = 0.1, min_epoch = 1000, 
+        plot = True, plot_name = None):
 
     time_begin = time.time()
     W, b = NN_train_phase_split_calculation(train_data, test_data, trans = trans,
                             hidden_cells = hidden_cells, 
                             batch_size = batch_size, epoch = epoch, 
+                            GL = GL, min_epoch = min_epoch, 
                             plot = plot, plot_name = plot_name)
     time_end = time.time()
 
