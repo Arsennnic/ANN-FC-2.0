@@ -195,6 +195,7 @@ class PrintDot(keras.callbacks.Callback):
 def plot_history(history):
     plt.figure()
     plt.xlabel('Epoch')
+    plt.yscale('log')
     plt.ylabel('Mean Abs Error')
     plt.plot(history.epoch, np.array(history.history['mean_absolute_error']),
             label='Train Loss')
@@ -203,9 +204,41 @@ def plot_history(history):
     plt.legend()
     plt.show()
 
-def NN_train_phase_envelope(train_data, test_data, 
-                            hidden_cells = 10, batch_size = 30, 
-                            epoch = 100, plot = True, plot_name = None):
+class EarlyStoppingByGL(keras.callbacks.Callback):
+    def __init__(self, alpha = 0.1, min_epoch = 1000, verbose=0):
+        super(keras.callbacks.Callback, self).__init__()
+        self.min_val_loss = 1.0
+        self.min_val_loss_batch = 1.0
+        self.min_epoch = min_epoch
+        self.verbose = verbose
+        self.alpha = alpha
+
+    def on_epoch_end(self, epoch, logs={}):
+        val_loss = logs.get('val_loss')
+
+        if self.min_val_loss > val_loss:
+            self.min_val_loss = val_loss
+
+        if epoch % 100 == 1:
+            self.min_val_loss_batch = 1.0
+
+        if self.min_val_loss_batch > val_loss:
+            self.min_val_loss_batch = val_loss
+
+        if (epoch > self.min_epoch and epoch % 100 == 0):
+            GL = self.min_val_loss_batch / self.min_val_loss - 1.0
+
+            if GL > self.alpha:
+                print("Epoch %05d: Modified generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
+                self.model.stop_training = True
+        
+        if epoch % 100 == 0:
+            GL = val_loss / self.min_val_loss - 1.0
+            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
+
+def NN_train_phase_envelope(train_data, test_data, hidden_cells = 10, batch_size = 30, 
+                            epoch = 100, GL = 0.1, min_epoch = 1000, 
+                            plot = True, plot_name = None):
     time_begin = time.time()
     # training featrue and target
     print("Read training data:")
@@ -239,10 +272,22 @@ def NN_train_phase_envelope(train_data, test_data,
 
     model.compile(loss='mse', optimizer = optimizer, metrics=['mae'])
 
-    history = model.fit(feature, target, epochs = epoch,
-            validation_split=0.1, verbose=0)
+    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
+
+    filepath = './stab_weights'
+    #filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, 
+            monitor='val_loss', verbose = 0, 
+            save_best_only=True, save_weights_only=True,
+            mode='min')
+
+    history = model.fit(feature, target, batch_size = batch_size,
+            epochs = epoch, validation_split=0.1, verbose=0,
+            callbacks = [earlystop, checkpoint])
              
     plot_history(history)
+
+    model.load_weights(filepath)
 
     W = []
     b = []
@@ -256,13 +301,10 @@ def NN_train_phase_envelope(train_data, test_data,
     for layer in model.layers:
         layer.set_weights([W[i], b[i]])
         i += 1
-    #pred = NN_STAB_predict_saturation_pressure(min_W, min_b, data_file = test_data, 
-    #                                                       plot = plot, plot_name = plot_name)
-    #print("L_inf error: %f" %(Linf_error))
 
     [loss, mae] = model.evaluate(feature_test, target_test, verbose=0)
 
-    print("Testing set Mean Abs Error: ${:1.6f}".format(mae))
+    print "Loss: " + str(loss) + ", MAE: " + str(mae)
 
     test_predictions = model.predict(feature_test)
     print(test_predictions.shape)
@@ -276,7 +318,17 @@ def NN_train_phase_envelope(train_data, test_data,
     plt.plot([-100, 100], [-100, 100])
     plt.show()
 
-    plt.scatter(target_test[:,1], test_predictions[:,1])
+    filted_target_test = []
+    filted_prediction_test = []
+    for t, p in zip(target_test[:,1], test_predictions[:,1]):
+        if t > 1.0:
+            filted_target_test.append(t)
+            filted_prediction_test.append(p)
+
+    filted_target_test = np.array(filted_target_test)
+    filted_prediction_test = np.array(filted_prediction_test)
+
+    plt.scatter(filted_target_test, filted_prediction_test)
     plt.xlabel('True Lower Saturation Pressure')
     plt.ylabel('Predictions')
     plt.axis('equal')
@@ -285,17 +337,22 @@ def NN_train_phase_envelope(train_data, test_data,
     plt.plot([-100, 100], [-100, 100])
     plt.show()
 
-    error = test_predictions - target_test
-    plt.hist(error, bins = 50)
-    plt.xlabel("Prediction Error")
+    error_upper = test_predictions[:,0] - target_test[:,0]
+    plt.hist(error_upper, bins = 50)
+    plt.xlabel("Prediction Error: Upper Saturation Pressure")
+    plt.ylabel("Count")
+    plt.show()
+
+    error_lower = filted_prediction_test - filted_target_test
+    plt.hist(error_lower, bins = 50)
+    plt.xlabel("Prediction Error: Lower Saturation Pressure")
     plt.ylabel("Count")
     plt.show()
 
     return W, b
 
-def train(train_data, test_data, 
-                            hidden_cells = 10, batch_size = 30, 
-                            epoch = 100, plot = True, plot_name = None):
+def train(train_data, test_data, hidden_cells = 10, batch_size = 30, epoch = 100, 
+        GL = 0.1, min_epoch = 1000, plot = True, plot_name = None):
 
     #Wf, bf, min_W, min_b, pred = NN_train_phase_envelope(train_data, test_data, 
     #                        hidden_cells = hidden_cells, 
@@ -304,6 +361,7 @@ def train(train_data, test_data,
     W, b = NN_train_phase_envelope(train_data, test_data, 
                             hidden_cells = hidden_cells, 
                             batch_size = batch_size, epoch = epoch, 
+                            GL = GL, min_epoch = min_epoch,
                             plot = plot, plot_name = plot_name)
 
     return W, b

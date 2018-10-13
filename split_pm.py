@@ -32,8 +32,9 @@ def NN_SPLIT_data_generation(data_file, scale = False,
 
         if t[0] < 1e-6 or t[0] > 1.0 - 1e-6:
             flag = False
+
         for i in range(ntarget - 1):
-            if t[i] < 1e-30:
+            if t[i + 1] < 1e-30:
                 flag = False
 
         if flag:
@@ -375,6 +376,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
     def __init__(self, alpha = 0.1, min_epoch = 1000, verbose=0):
         super(keras.callbacks.Callback, self).__init__()
         self.min_val_loss = 1.0
+        self.min_val_loss_batch = 1.0
         self.min_epoch = min_epoch
         self.verbose = verbose
         self.alpha = alpha
@@ -385,15 +387,22 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         if self.min_val_loss > val_loss:
             self.min_val_loss = val_loss
 
-        GL = val_loss / self.min_val_loss - 1.0
-        if (GL > self.alpha and epoch > self.min_epoch and epoch % 100 == 0):
-            #if self.verbose > 0:
-            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.3f" % (epoch, val_loss, self.min_val_loss, GL))
-            self.model.stop_training = True
+        if epoch % 100 == 1:
+            self.min_val_loss_batch = 1.0
+
+        if self.min_val_loss_batch > val_loss:
+            self.min_val_loss_batch = val_loss
+
+        if (epoch > self.min_epoch and epoch % 100 == 0):
+            GL = self.min_val_loss_batch / self.min_val_loss - 1.0
+
+            if GL > self.alpha:
+                print("Epoch %05d: Modified generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
+                self.model.stop_training = True
         
         if epoch % 100 == 0:
-            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.3f" % (epoch, val_loss, self.min_val_loss, GL))
-
+            GL = val_loss / self.min_val_loss - 1.0
+            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
 
 def NN_train_phase_split_calculation(train_data, test_data, trans = None,
                                      hidden_cells = 10, batch_size = 30, 
@@ -433,7 +442,7 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
 
     earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
 
-    filepath = './weights'
+    filepath = './split_weights'
     #filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
     checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, 
             monitor='val_loss', verbose = 0, 
@@ -474,9 +483,8 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
     plt.xlabel('Mole Fraction')
     plt.ylabel('Predictions')
     plt.axis('equal')
-    plt.xlim(plt.xlim())
-    plt.ylim(plt.ylim())
-    plt.plot([-100, 100], [-100, 100])
+    plt.xlim([-0.1,1.1])
+    plt.ylim([-0.1,1.1])
     plt.show()
 
     for i in range(nstatus - 1):
@@ -491,11 +499,19 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
         plt.plot([-100, 100], [-100, 100])
         plt.show()
 
-    error = test_predictions - target_test
+    error = test_predictions[:,0] - target_test[:,0]
     plt.hist(error, bins = 50)
-    plt.xlabel("Prediction Error")
+    plt.xlabel("Mole Fraction Prediction Error")
     plt.ylabel("Count")
     plt.show()
+
+    for i in range(nstatus - 1):
+        error = test_predictions[:,i+1] - target_test[:,i+1]
+        plt.hist(error, bins = 50)
+        name = 'K_' + str(i+1) + ' Prediction Error'
+        plt.xlabel(name)
+        plt.ylabel("Count")
+        plt.show()
     
     #return Wf, bf, min_W, min_b, pred
     return W, b
