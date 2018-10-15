@@ -397,13 +397,13 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
 
         if self.min_val_loss > val_loss:
             self.min_val_loss = val_loss
+            self.epoch_opt = epoch
 
         if (epoch + 1) % 100 == 0:
             self.min_val_loss_batch = 1.0
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
-            self.epoch_opt = epoch
 
         if (epoch + 1) % 100 == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
