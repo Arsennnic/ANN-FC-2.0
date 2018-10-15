@@ -267,12 +267,19 @@ class PrintDot(keras.callbacks.Callback):
 def plot_history(history):
     plt.figure()
     plt.xlabel('Epoch')
-    #plt.yscale('log')
+    plt.yscale('log')
     plt.ylabel('Loss ')
-    plt.plot(history.epoch, np.array(history.history['loss']),
-            label='Train Loss')
-    plt.plot(history.epoch, np.array(history.history['val_loss']),
-            label = 'Validation Loss')
+
+    loss = []
+    epoch = []
+    val_loss = []
+
+    for e, l, vl in zip(history.epoch, history.history['loss'], history.history['val_loss']):
+        if (e > 100):
+            epoch.append(e)
+            loss.append(l)
+            val_loss.append(vl)
+
     plt.legend()
     plt.show()
 
@@ -285,6 +292,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         self.verbose = verbose
         self.GL = 0.0
         self.alpha = alpha
+        self.epoch_opt = 0
 
     def on_epoch_end(self, epoch, logs={}):
         val_loss = logs.get('val_loss')
@@ -297,6 +305,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
+            self.epoch_opt = epoch
 
         if (epoch + 1) % 100 == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
@@ -305,7 +314,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
 
         if (epoch > self.min_epoch and (epoch + 1) % 100 == 0):
             if self.GL > self.alpha:
-                print("    Earlystopping!")
+                print("    Earlystopping! Best Performance epoch %d" %(self.epoch_opt))
                 self.model.stop_training = True
 
 def NN_train_phase_envelope(train_data, test_data, 
