@@ -77,7 +77,7 @@ def NN_SPLIT_data_generation(data_file, scale = False,
             feature[:,i] = NN_SPLIT_data_transformation(feature[:,i], 
                         min_v, max_v)
 
-    return feature, target
+    return {'feature': feature, 'target': target}
 
 
 def NN_SPLIT_data_transformation(data, data_min, data_max, 
@@ -362,12 +362,12 @@ def NN_SPLIT_plot(data_file, feature, target, prediction,
 def plot_history(history):
     plt.figure()
     plt.xlabel('Epoch')
-    plt.yscale('log')
-    plt.ylabel('Mean Abs Error')
-    plt.plot(history.epoch, np.array(history.history['mean_absolute_error']),
+    #plt.yscale('log')
+    plt.ylabel('Loss')
+    plt.plot(history.epoch, np.array(history.history['loss']),
             label='Train Loss')
-    plt.plot(history.epoch, np.array(history.history['val_mean_absolute_error']),
-            label = 'Val loss')
+    plt.plot(history.epoch, np.array(history.history['val_loss']),
+            label = 'Validation Loss')
     plt.legend()
     plt.show()
 
@@ -379,6 +379,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         self.min_val_loss_batch = 1.0
         self.min_epoch = min_epoch
         self.verbose = verbose
+        self.GL = 0.0
         self.alpha = alpha
 
     def on_epoch_end(self, epoch, logs={}):
@@ -387,55 +388,42 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         if self.min_val_loss > val_loss:
             self.min_val_loss = val_loss
 
-        if epoch % 100 == 1:
+        if (epoch + 1) % 100 == 0:
             self.min_val_loss_batch = 1.0
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
 
-        if epoch % 100 == 0:
-            GL = val_loss / self.min_val_loss - 1.0
-            print("    Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" 
-                    % (epoch, val_loss, self.min_val_loss, GL))
+        if (epoch + 1) % 100 == 0:
+            self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
+            print("    Epoch %05d: MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
+                    % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
-        if (epoch > self.min_epoch and epoch % 100 == 0):
-            GL = self.min_val_loss_batch / self.min_val_loss - 1.0
-
-            if GL > self.alpha:
-                print("    Earlystopping MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
-                        % (val_loss, self.min_val_loss, GL))
+        if (epoch > self.min_epoch and (epoch + 1) % 100 == 0):
+            if self.GL > self.alpha:
+                print("    Earlystopping!")
                 self.model.stop_training = True
         
 
-def NN_train_phase_split_calculation(train_data, test_data, trans = None,
+def NN_train_phase_split_calculation(train_data, test_data, 
                                      hidden_layer = 1, hidden_cells = [10], 
-                                     batch_size = 30, epoch = 100, validation_split = 0.1,
+                                     batch_size = 30, epoch = 100, 
+                                     validation_split = 0.1, has_val_data = False, validation_data = None,
                                      GL = 0.1, min_epoch = 1000,
                                      plot = False, plot_name = None):
-    # training featrue and target
-    feature_scale = []
-    target_scale = []
-    feature, target = NN_SPLIT_data_generation(train_data, scale = True, 
-                                                feature_scale = feature_scale,
-                                                target_scale = target_scale,
-                                                trans = trans)
-    #print(len(feature[0]), len(target), feature_scale, target_scale)
-    print "Number of training examples: " + str(len(target))
-    
-    # testing featrue and target
-    feature_test, target_test = NN_SPLIT_data_generation(test_data, 
-            scale = False, skip_header = 1)
-    print "Number of testing examples: " + str(len(target_test))
-    
+
+    feature = train_data['feature'] 
+    target = train_data['target'] 
+
+    feature_test = test_data['feature'] 
+    target_test = test_data['target'] 
+
+    if has_val_data:
+        feature_val = validation_data['feature'] 
+        target_val = validation_data['target'] 
+
     nfeature = len(feature[0])
     nstatus = len(target[0])
-
-    #model = keras.Sequential([
-    #            keras.layers.Dense(hidden_cells,
-    #                activation = tf.nn.softmax,
-    #                input_shape = (nfeature,)),
-    #            keras.layers.Dense(nstatus)
-    #            ])
 
     model = keras.Sequential()
     model.add(keras.layers.Dense(hidden_cells[0], 
@@ -456,15 +444,20 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
     earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
 
     filepath = './split_weights'
-    #filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
     checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, 
             monitor='val_loss', verbose = 0, 
             save_best_only=True, save_weights_only=True,
             mode='min')
 
-    history = model.fit(feature, target, batch_size = batch_size, 
-            epochs = epoch, validation_split=validation_split, verbose=0,
-            callbacks = [earlystop, checkpoint])
+    if has_val_data:
+        history = model.fit(feature, target, batch_size = batch_size, 
+                epochs = epoch, validation_data=(feature_val, target_val), 
+                verbose=0,
+                callbacks = [earlystop, checkpoint])
+    else:
+        history = model.fit(feature, target, batch_size = batch_size, 
+                epochs = epoch, validation_split=validation_split, verbose=0,
+                callbacks = [earlystop, checkpoint])
 
     plot_history(history)
 
@@ -477,9 +470,6 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
         W.append(layer.get_weights()[0])
         b.append(layer.get_weights()[1])
 
-    NN_SPLIT_scale_feature(feature_test, feature_scale)
-    NN_SPLIT_scale_target(target_test, target_scale, method = trans)
-
     [loss, mae] = model.evaluate(feature_test, target_test, 
             verbose=0)
 
@@ -487,22 +477,26 @@ def NN_train_phase_split_calculation(train_data, test_data, trans = None,
 
     test_predictions = model.predict(feature_test)
 
-    NN_SPLIT_scale_back_target(target_test, target_scale,
-            method = trans)
-    NN_SPLIT_scale_back_target(test_predictions, target_scale,
-            method = trans)
-
-    return W, b, loss, target_test, test_predictions
+    return W, b, loss, test_predictions
 
 def plot_test_result(target, predictions, plot_name):
+    target_min = target.min(axis=0)
+    target_max = target.max(axis=0)
+    pred_min = predictions.min(axis=0)
+    pred_max = predictions.max(axis=0)
+
+    v_min = np.minimum(target_min, pred_min)
+    v_max = np.maximum(target_max, pred_max)
+
     nstatus = target.shape[1] 
 
-    plt.scatter(target[:,0], predictions[:,0])
+    plt.plot([v_min[0], v_max[0]], [v_min[0], v_max[0]], 
+            lw = 2, c = 'red', zorder = 10, label = "Equal")
+    plt.scatter(target[:,0], predictions[:,0], 
+            label = "Testing data")
     plt.xlabel('Mole Fraction')
     plt.ylabel('Predictions')
-    plt.axis('equal')
-    plt.xlim([-0.1,1.1])
-    plt.ylim([-0.1,1.1])
+    plt.legend()
     plt.show()
     file_name = plot_name + "-Fv.eps"
     plt.savefig(file_name)    
@@ -510,20 +504,22 @@ def plot_test_result(target, predictions, plot_name):
     plt.savefig(file_name)    
 
     for i in range(nstatus - 1):
-        plt.scatter(target[:,i+1], 
-                predictions[:,i+1])
-        name = 'K_' + str(i+1)
+        plt.plot([v_min[i+1], v_max[i+1]], [v_min[i+1], v_max[i+1]], 
+                lw = 2, c = 'red', zorder = 10, label = "Equal")
+        plt.scatter(target[:,i+1], predictions[:,i+1], 
+                label = "Testing data")
+
+        name = 'K' + str(i+1)
         plt.xlabel(name)
         plt.ylabel('Predictions')
-        plt.axis('equal')
-        plt.xlim(plt.xlim())
-        plt.ylim(plt.ylim())
-        plt.plot([-100, 100], [-100, 100])
+        plt.legend()
         plt.show()
         file_name = plot_name + "-" + name + ".eps"
         plt.savefig(file_name)    
         file_name = plot_name + "-" + name + ".pdf"
         plt.savefig(file_name)    
+
+
 
     error = predictions - target
 
@@ -538,50 +534,84 @@ def plot_test_result(target, predictions, plot_name):
 
     for i in range(nstatus - 1):
         plt.hist(error[:,i+1], bins = 50)
-        name = 'K_' + str(i+1) + ' Prediction Error'
+        name = 'K' + str(i+1) + ' Prediction Error'
         plt.xlabel(name)
         plt.ylabel("Count")
         plt.show()
-        file_name = plot_name + '-K_' + str(i+1) + "-error.eps"
+        file_name = plot_name + '-K' + str(i+1) + "-error.eps"
         plt.savefig(file_name)    
-        file_name = plot_name + '-K_' + str(i+1) + "-error.pdf"
+        file_name = plot_name + '-K' + str(i+1) + "-error.pdf"
         plt.savefig(file_name)    
     
 
 def train(train_data, test_data, trans = None,
-        hidden_layer = 1, hidden_cells = [10], batch_size = 30, 
-        epoch = 100, validation_split = 0.1, GL = 0.1, 
-        min_epoch = 1000, train_number = 10, 
+        hidden_layer = 1, hidden_cells = [10], batch_size = 30, epoch = 100, 
+        validation_split = 0.1, validation_data = None,
+        GL = 0.1, min_epoch = 1000, train_number = 10, 
         plot = False, plot_name = None):
 
     time_begin = time.time()
+
+    # training featrue and target
+    feature_scale = []
+    target_scale = []
+    train = NN_SPLIT_data_generation(train_data, scale = True, 
+                                                feature_scale = feature_scale,
+                                                target_scale = target_scale,
+                                                trans = trans)
+    #print(len(feature[0]), len(target), feature_scale, target_scale)
+    print "*** Number of training examples: " + str(len(train['target']))
+    
+    # testing featrue and target
+    test = NN_SPLIT_data_generation(test_data, 
+            scale = False, skip_header = 1)
+    NN_SPLIT_scale_feature(test['feature'], feature_scale)
+    NN_SPLIT_scale_target(test['target'], target_scale, method = trans)
+    print "*** Number of testing examples: " + str(len(test['target']))
+
+    validation = None
+    has_val_data = False
+    if validation_data is not None:
+        validation = NN_SPLIT_data_generation(validation_data,
+                scale = False, skip_header = 1)
+
+        NN_SPLIT_scale_feature(validation['feature'], feature_scale)
+        NN_SPLIT_scale_target(validation['target'], target_scale, 
+                method = trans)
+        has_val_data = True
+        print "*** Number of validation examples: " + str(len(validation['target']))
+
     loss_opt = 1.0;
     W_opt = None
     b_opt = None
-    test_target = None
-    test_prediction = None
+    pred_opt = None
 
+    print "*** Training begins ..."
     for i in range(train_number):
-        print("============ Training Process: %d" %(i))
-        W, b, loss, test_target0, test_prediction0 = NN_train_phase_split_calculation(
-                train_data, test_data, trans = trans,
+        print("============ TRAINING PROCESS: %d ============ " %(i + 1))
+        W, b, loss, pred = NN_train_phase_split_calculation(
+                train, test, 
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
-                validation_split = validation_split,
+                validation_split = validation_split, has_val_data = has_val_data, validation_data = validation,
                 GL = GL, min_epoch = min_epoch, 
                 plot = plot, plot_name = plot_name)
         if loss < loss_opt:
             loss_opt = loss
             W_opt = W
             b_opt = b
-            test_target = test_target0
-            test_prediction = test_prediction0
+            pred_opt = pred
+
+    NN_SPLIT_scale_back_target(test['target'], target_scale,
+            method = trans)
+    NN_SPLIT_scale_back_target(pred_opt, target_scale,
+            method = trans)
 
     time_end = time.time()
     print("Time cost: %f seconds" %(time_end - time_begin))
 
     if (plot):
-        plot_test_result(test_target, test_prediction, plot_name)
+        plot_test_result(test['target'], pred_opt, plot_name)
 
     return W_opt, b_opt, loss_opt
 

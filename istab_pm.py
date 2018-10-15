@@ -8,7 +8,7 @@ import math
 
 def NN_STAB_data_generation(data_file, rescaling = False, 
         feature_scale = None, target_scale = None,
-        skip_header = 0, for_training = False):
+        skip_header = 1):
 
     data = np.genfromtxt(data_file, delimiter=',', skip_header = skip_header)
 
@@ -21,13 +21,11 @@ def NN_STAB_data_generation(data_file, rescaling = False,
     feature = []
     target = []
     for f, t in zip(feature0, target0):
-        if for_training:
-            if t[0] > t[1]:
-                feature.append(f)
-                target.append(t)
-        else:
+        if t[0] > t[1]:
             feature.append(f)
             target.append(t)
+        else:
+            print f, t
 
     feature = np.array(feature)
     target = np.array(target)
@@ -59,7 +57,7 @@ def NN_STAB_data_generation(data_file, rescaling = False,
                 feature_scale.append(min_v)
                 feature_scale.append(max_v)
         
-    return feature, target
+    return {'feature': feature, 'target': target}
 
 def NN_STAB_scale_matrix_bias(W, b, feature_scale, target_scale):
     P_min = target_scale[0]
@@ -185,6 +183,80 @@ def NN_STAB_predict_saturation_pressure(W, b, feature = None, target = None,
     return feature, target, pred, L_inf
 
 
+def NN_STAB_data_transformation(data, data_min, data_max, 
+        method = None):
+    """
+        1. Default: min-max 
+        2. Log: log
+        3. New: test new transformation
+    """
+
+    if method is None:
+        data = (data - data_min) / (data_max - data_min)
+    elif method is "log":
+        data = np.log(data)
+    elif method is "new":
+        data = (np.log(data) - np.log(data_min)) / (np.log(data_max) - np.log(data_min))
+        data = np.sqrt(data)
+
+    return data
+
+
+
+def NN_STAB_data_detransformation(data, data_min, data_max,
+        method = None):
+    """
+        1. Default: min-max
+        2. Log
+        3. new transformation
+    """
+    if method is None:
+        data = data * (data_max - data_min) + data_min
+    elif method is "log":
+        data = np.exp(data)
+    elif method is "new":
+        data = np.square(data)
+        data = data * (np.log(data_max) - np.log(data_min)) + np.log(data_min)
+        data = np.exp(data)
+
+    return data
+
+
+def NN_STAB_scale_feature(data, scale):
+    """
+        scale feature: min-max
+    """
+    n = data.shape[1]
+
+    for i in range(n):
+        data[:,i] = NN_STAB_data_transformation(data[:,i], 
+                scale[i*2], scale[i*2+1])
+
+
+def NN_STAB_scale_target(data, scale, method = None):
+    """
+        target scale
+    """
+    n = data.shape[1]
+
+    data[:,0] = NN_STAB_data_transformation(data[:,0], scale[0], scale[1])
+
+    for i in range(n - 1):
+        data[:,i+1] = NN_STAB_data_transformation(data[:,i+1], 
+                scale[(i+1)*2], scale[(i+1)*2+1], method = method)
+
+def NN_STAB_scale_back_target(data, scale, method = None):
+    """
+        back to target scale
+    """
+    n = data.shape[1]
+
+    data[:,0] = NN_STAB_data_detransformation(data[:,0], scale[0], scale[1])
+
+    for i in range(n - 1):
+        data[:,i+1] = NN_STAB_data_detransformation(data[:,i+1], 
+                scale[(i+1)*2], scale[(i+1)*2+1], method = method)
+
 class PrintDot(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs):
         if epoch % 100 == 0: print('')
@@ -195,12 +267,12 @@ class PrintDot(keras.callbacks.Callback):
 def plot_history(history):
     plt.figure()
     plt.xlabel('Epoch')
-    plt.yscale('log')
-    plt.ylabel('Mean Abs Error')
-    plt.plot(history.epoch, np.array(history.history['mean_absolute_error']),
+    #plt.yscale('log')
+    plt.ylabel('Loss ')
+    plt.plot(history.epoch, np.array(history.history['loss']),
             label='Train Loss')
-    plt.plot(history.epoch, np.array(history.history['val_mean_absolute_error']),
-            label = 'Val loss')
+    plt.plot(history.epoch, np.array(history.history['val_loss']),
+            label = 'Validation Loss')
     plt.legend()
     plt.show()
 
@@ -211,6 +283,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         self.min_val_loss_batch = 1.0
         self.min_epoch = min_epoch
         self.verbose = verbose
+        self.GL = 0.0
         self.alpha = alpha
 
     def on_epoch_end(self, epoch, logs={}):
@@ -219,54 +292,51 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
         if self.min_val_loss > val_loss:
             self.min_val_loss = val_loss
 
-        if epoch % 100 == 1:
+        if (epoch + 1) % 100 == 0:
             self.min_val_loss_batch = 1.0
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
 
-        if (epoch > self.min_epoch and epoch % 100 == 0):
-            GL = self.min_val_loss_batch / self.min_val_loss - 1.0
+        if (epoch + 1) % 100 == 0:
+            self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
+            print("    Epoch %05d: MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
+                    % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
-            if GL > self.alpha:
-                print("Epoch %05d: Modified generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
+        if (epoch > self.min_epoch and (epoch + 1) % 100 == 0):
+            if self.GL > self.alpha:
+                print("    Earlystopping!")
                 self.model.stop_training = True
-        
-        if epoch % 100 == 0:
-            GL = val_loss / self.min_val_loss - 1.0
-            print("Epoch %05d: Generalization loss: (%1.4f / %1.4f) - 1.0 = %1.4f" % (epoch, val_loss, self.min_val_loss, GL))
 
-def NN_train_phase_envelope(train_data, test_data, hidden_cells = 10, batch_size = 30, 
+def NN_train_phase_envelope(train_data, test_data, 
+                            hidden_layer = 1, hidden_cells = [10], batch_size = 30, 
                             epoch = 100, GL = 0.1, min_epoch = 1000, 
+                            validation_split = 0.1, has_val_data = False, validation_data = None,
                             plot = True, plot_name = None):
-    time_begin = time.time()
-    # training featrue and target
-    print("Read training data:")
-    feature_scale = []
-    target_scale = []
-    feature, target = NN_STAB_data_generation(train_data, 
-            rescaling = True, feature_scale = feature_scale,
-            target_scale = target_scale, for_training = True)
-    print(len(feature[0]), len(target), feature_scale, target_scale)
-    print("Done")
-    
-    # testing featrue and target
-    print("Read testing data:")
-    feature_test, target_test = NN_STAB_data_generation(test_data, 
-            for_training = True)
-    print(len(feature_test[0]), len(target_test))
-    print("Done")
+
+    feature = train_data['feature'] 
+    target = train_data['target'] 
+
+    feature_test = test_data['feature'] 
+    target_test = test_data['target'] 
+
+    if has_val_data:
+        feature_val = validation_data['feature'] 
+        target_val = validation_data['target'] 
     
     nfeature = len(feature[0])
     nstatus = len(target[0])
-    print(nfeature, nstatus)
 
-    model = keras.Sequential([
-            keras.layers.Dense(hidden_cells, 
+    model = keras.Sequential()
+    model.add(keras.layers.Dense(hidden_cells[0], 
                 activation = tf.nn.softmax,
-                input_shape = (nfeature,)),
-            keras.layers.Dense(nstatus)
-            ])
+                input_shape = (nfeature,)))
+
+    for i in range(hidden_layer - 1):
+        model.add(keras.layers.Dense(hidden_cells[i+1],
+                activation = tf.nn.softmax))
+
+    model.add(keras.layers.Dense(nstatus))
 
     optimizer = tf.train.RMSPropOptimizer(0.001)
 
@@ -281,9 +351,15 @@ def NN_train_phase_envelope(train_data, test_data, hidden_cells = 10, batch_size
             save_best_only=True, save_weights_only=True,
             mode='min')
 
-    history = model.fit(feature, target, batch_size = batch_size,
-            epochs = epoch, validation_split=0.1, verbose=0,
-            callbacks = [earlystop, checkpoint])
+    if has_val_data:
+        history = model.fit(feature, target, batch_size = batch_size,
+                epochs = epoch, validation_data=(feature_val, target_val), 
+                verbose=0,
+                callbacks = [earlystop, checkpoint])
+    else:
+        history = model.fit(feature, target, batch_size = batch_size,
+                epochs = epoch, validation_split=validation_split, verbose=0,
+                callbacks = [earlystop, checkpoint])
              
     plot_history(history)
 
@@ -295,76 +371,155 @@ def NN_train_phase_envelope(train_data, test_data, hidden_cells = 10, batch_size
         W.append(layer.get_weights()[0])
         b.append(layer.get_weights()[1])
 
-    NN_STAB_scale_matrix_bias(W, b, feature_scale, target_scale)
-    
-    i = 0
-    for layer in model.layers:
-        layer.set_weights([W[i], b[i]])
-        i += 1
-
     [loss, mae] = model.evaluate(feature_test, target_test, verbose=0)
 
-    print "Loss: " + str(loss) + ", MAE: " + str(mae)
+    print("    Training Loss: %1.5f, MAE: %1.5f" %(loss, mae))
 
     test_predictions = model.predict(feature_test)
-    print(test_predictions.shape)
 
-    plt.scatter(target_test[:,0], test_predictions[:,0])
+    return W, b, loss, test_predictions
+
+def plot_test_result(target, predictions, plot_name):
+    target_min = target.min(axis=0)
+    target_max = target.max(axis=0)
+    pred_min = predictions.min(axis=0)
+    pred_max = predictions.max(axis=0)
+
+    pu_min = np.minimum(target_min[0], pred_min[0])
+    pu_max = np.maximum(target_max[0], pred_max[0])
+
+    plt.plot([pu_min, pu_max], [pu_min, pu_max], 
+            lw = 2, c = 'red', zorder = 10, label = "Equal")
+    plt.scatter(target[:,0], predictions[:,0], label = "Testing data")
     plt.xlabel('True Upper Saturation Pressure')
     plt.ylabel('Predictions')
-    plt.axis('equal')
-    plt.xlim(plt.xlim())
-    plt.ylim(plt.ylim())
-    plt.plot([-100, 100], [-100, 100])
+    plt.legend()
     plt.show()
+    file_name = plot_name + "-Psu.eps"
+    plt.savefig(file_name)    
+    file_name = plot_name + "-Psu.pdf"
+    plt.savefig(file_name)    
 
-    filted_target_test = []
-    filted_prediction_test = []
-    for t, p in zip(target_test[:,1], test_predictions[:,1]):
+    filted_target = []
+    filted_prediction = []
+    for t, p in zip(target[:,1], predictions[:,1]):
         if t > 1.0:
-            filted_target_test.append(t)
-            filted_prediction_test.append(p)
+            filted_target.append(t)
+            filted_prediction.append(p)
 
-    filted_target_test = np.array(filted_target_test)
-    filted_prediction_test = np.array(filted_prediction_test)
+    filted_target = np.array(filted_target)
+    filted_prediction = np.array(filted_prediction)
 
-    plt.scatter(filted_target_test, filted_prediction_test)
+    target_min = filted_target.min()
+    target_max = filted_target.max()
+    pred_min = filted_prediction.min()
+    pred_max = filted_prediction.max()
+
+    pl_min = np.minimum(target_min, pred_min)
+    pl_max = np.maximum(target_max, pred_max)
+
+    plt.plot([pl_min, pl_max], [pl_min, pl_max], 
+            lw = 2, c = 'red', zorder = 10, label = "Equal")
+    plt.scatter(filted_target, filted_prediction, label = "Tesing data")
     plt.xlabel('True Lower Saturation Pressure')
     plt.ylabel('Predictions')
-    plt.axis('equal')
-    plt.xlim(plt.xlim())
-    plt.ylim(plt.ylim())
-    plt.plot([-100, 100], [-100, 100])
+    plt.legend()
     plt.show()
+    file_name = plot_name + "-Psl.eps"
+    plt.savefig(file_name)    
+    file_name = plot_name + "-Psl.pdf"
+    plt.savefig(file_name)    
 
-    error_upper = test_predictions[:,0] - target_test[:,0]
+    error_upper = predictions[:,0] - target[:,0]
     plt.hist(error_upper, bins = 50)
     plt.xlabel("Prediction Error: Upper Saturation Pressure")
     plt.ylabel("Count")
     plt.show()
+    file_name = plot_name + "-Psu-error.eps"
+    plt.savefig(file_name)    
+    file_name = plot_name + "-Psu-error.pdf"
+    plt.savefig(file_name)    
 
-    error_lower = filted_prediction_test - filted_target_test
+    error_lower = filted_prediction - filted_target
     plt.hist(error_lower, bins = 50)
     plt.xlabel("Prediction Error: Lower Saturation Pressure")
     plt.ylabel("Count")
     plt.show()
+    file_name = plot_name + "-Psl-error.eps"
+    plt.savefig(file_name)    
+    file_name = plot_name + "-Psl-error.pdf"
+    plt.savefig(file_name)    
 
-    return W, b
 
-def train(train_data, test_data, hidden_cells = 10, batch_size = 30, epoch = 100, 
-        GL = 0.1, min_epoch = 1000, plot = True, plot_name = None):
+def train(train_data, test_data, trans = None,
+        hidden_layer = 1, hidden_cells = [10], 
+        batch_size = 30, epoch = 100, 
+        validation_split = 0.1, validation_data = None,
+        GL = 0.1, min_epoch = 1000, train_number = 10, 
+        plot = True, plot_name = None):
 
-    #Wf, bf, min_W, min_b, pred = NN_train_phase_envelope(train_data, test_data, 
-    #                        hidden_cells = hidden_cells, 
-    #                        batch_size = batch_size, epoch = epoch, 
-    #                        plot = plot, plot_name = plot_name)
-    W, b = NN_train_phase_envelope(train_data, test_data, 
-                            hidden_cells = hidden_cells, 
-                            batch_size = batch_size, epoch = epoch, 
-                            GL = GL, min_epoch = min_epoch,
-                            plot = plot, plot_name = plot_name)
+    time_begin = time.time()
 
-    return W, b
+    # training featrue and target
+    feature_scale = []
+    target_scale = []
+    train = NN_STAB_data_generation(train_data, rescaling = True, 
+            feature_scale = feature_scale,
+            target_scale = target_scale)
+    print "*** Number of training examples: " + str(len(train['target']))
+    
+    # testing featrue and target
+    test = NN_STAB_data_generation(test_data)
+    NN_STAB_scale_feature(test['feature'], feature_scale)
+    NN_STAB_scale_target(test['target'], target_scale, method = trans)
+    print "*** Number of testing examples: " + str(len(test['target']))
+
+    validation = None
+    has_val_data = False
+    if validation_data is not None:
+        validation = NN_STAB_data_generation(validation_data)
+
+        NN_STAB_scale_feature(validation['feature'], feature_scale)
+        NN_STAB_scale_target(validation['target'], target_scale, 
+                method = trans)
+        has_val_data = True
+        print "*** Number of validation examples: " + str(len(validation['target']))
+
+
+    loss_opt = 1.0;
+    W_opt = None
+    b_opt = None
+    pred_opt = None
+
+    print "*** Training begins ..."
+    for i in range(train_number):
+        print("============ TRAINING PROCESS: %d ============ " %(i + 1))
+        W, b, loss, pred = NN_train_phase_envelope(
+                train, test, 
+                hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
+                batch_size = batch_size, epoch = epoch, 
+                validation_split = validation_split, has_val_data = has_val_data, validation_data = validation,
+                GL = GL, min_epoch = min_epoch,
+                plot = plot, plot_name = plot_name)
+
+        if loss < loss_opt:
+            loss_opt = loss
+            W_opt = W
+            b_opt = b
+            pred_opt = pred
+
+    NN_STAB_scale_back_target(test['target'], target_scale,
+            method = trans)
+    NN_STAB_scale_back_target(pred_opt, target_scale,
+            method = trans)
+
+    time_end = time.time()
+    print("Time cost: %f seconds" %(time_end - time_begin))
+
+    if (plot):
+        plot_test_result(test['target'], pred_opt, plot_name)
+
+    return W_opt, b_opt, loss_opt
 
 
 
