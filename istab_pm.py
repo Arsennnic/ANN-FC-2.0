@@ -60,131 +60,8 @@ def read_data(data_file, rescaling = False,
         
     return {'feature': feature, 'target': target}
 
-def NN_STAB_scale_matrix_bias(W, b, feature_scale, target_scale):
-    P_min = target_scale[0]
-    P_max = target_scale[1]
 
-    W[-1][:,0] = (P_max - P_min) * W[-1][:,0]
-    b[-1][0] = (P_max - P_min) * b[-1][0] + P_min
-
-    P_min = target_scale[2]
-    P_max = target_scale[3]
-
-    W[-1][:,1] = (P_max - P_min) * W[-1][:,1]
-    b[-1][1] = (P_max - P_min) * b[-1][1] + P_min
-    
-    nf = W[0].shape[0]
-
-    B = np.zeros(nf)
-    for i in range(nf):
-        v_min = feature_scale[i*2]
-        v_max = feature_scale[i*2+1]
-
-        if (math.fabs(v_max - v_min) > 1e-5):
-            B[i] = v_min / (v_max - v_min)
-
-    b[0] = b[0] - np.matmul(B, W[0])
- 
-    M = np.eye(nf)
-    for i in range(nf):
-        v_min = feature_scale[i*2]
-        v_max = feature_scale[i*2+1]
-
-        if math.fabs(v_max - v_min) > 1e-5:
-            M[i][i] = 1.0 / (v_max - v_min)
-
-    W[0] = np.matmul(M, W[0])
-
-def NN_STAB_predict_saturation_pressure(W, b, feature = None, target = None, 
-                                        data_file = None, plot = True, plot_name = None,
-                                        output = True, output_file = None):
-    size = len(W)
-    
-    if feature is None:
-        if data_file is None:
-            return
-        else:
-            feature, target = read_data(data_file, 
-                    for_training = False)
-    
-    #print(target[0:100])
-    nfeature = len(feature[0])
-    
-    y = [None] * size
-    
-    x = tf.placeholder(tf.float32, [None, nfeature])
-    
-    input_x = x
-    for i in range(size - 1):
-        y[i] = tf.nn.softmax(tf.matmul(input_x, W[i].astype(np.float32)) + b[i], name="output")
-        input_x = y[i]
-            
-    y[size - 1] = tf.matmul(input_x, W[size - 1].astype(np.float32)) + b[size - 1]
-    
-    if target is not None:
-        max_diff = tf.norm(y[size - 1] - target)
-        max_index = tf.argmax(y[size - 1] - target)
-    else:
-        max_diff = tf.zeros([1])
-        max_index = 0
-        
-    pred = None
-    L_inf = None
-    with tf.Session() as sess:
-        [pred, L_inf, L_index] = sess.run([y[size - 1], max_diff, max_index], feed_dict={x: feature})
-        
-    print("L inf = %f" %L_inf)
-    print L_index
-    print feature[L_index], target[L_index], pred[L_index]
-
-    if output:
-        if output_file is None:
-            output_file = "ps-prediction.csv"
-
-        output_value = []
-        for f, p in zip(feature, pred):
-            value = []
-
-            for f0 in f:
-                value.append(f0)
-            for p0 in p:
-                value.append(p0)
-
-            output_value.append(value)
-
-        np.savetxt(output_file, output_value, delimiter=",")
-
-    if plot:
-        composition = []
-        for f in feature:
-            composition.append(f[0])
-        
-        plt.clf()
-        plt.xlabel("Composition")
-        plt.ylabel("Pressure, atm")
-        
-        plt.plot(composition, pred, label='ANN-STAB model', color = 'red')
-        if target is not None:
-            #print(target[0:100])
-            plt.plot(composition, target, label='Real Saturation', color = 'blue')
-        plt.legend(bbox_to_anchor = (0.05, 1.0), loc = "upper left")
-        plt.show()
-        
-        file_name = None
-        
-        if plot_name is None:
-            plot_name = "ANN-STAB-PM-saturation-envelope"
-        
-        file_name = plot_name + ".eps"    
-        plt.savefig(file_name)
-        
-        file_name = plot_name + ".pdf"
-        plt.savefig(file_name)
-    
-    return feature, target, pred, L_inf
-
-
-def NN_STAB_data_transformation(data, data_min, data_max, 
+def data_trans(data, data_min, data_max, 
         method = None):
     """
         1. Default: min-max 
@@ -204,7 +81,7 @@ def NN_STAB_data_transformation(data, data_min, data_max,
 
 
 
-def NN_STAB_data_detransformation(data, data_min, data_max,
+def data_detrans(data, data_min, data_max,
         method = None):
     """
         1. Default: min-max
@@ -223,39 +100,50 @@ def NN_STAB_data_detransformation(data, data_min, data_max,
     return data
 
 
-def NN_STAB_scale_feature(data, scale):
+def scale_feature(data, scale):
     """
         scale feature: min-max
     """
     n = data.shape[1]
 
     for i in range(n):
-        data[:,i] = NN_STAB_data_transformation(data[:,i], 
+        data[:,i] = data_trans(data[:,i], 
                 scale[i*2], scale[i*2+1])
 
 
-def NN_STAB_scale_target(data, scale, method = None):
+def scale_target(data, scale, method = None):
     """
         target scale
     """
     n = data.shape[1]
 
-    data[:,0] = NN_STAB_data_transformation(data[:,0], scale[0], scale[1])
+    data[:,0] = data_trans(data[:,0], scale[0], scale[1])
 
     for i in range(n - 1):
-        data[:,i+1] = NN_STAB_data_transformation(data[:,i+1], 
+        data[:,i+1] = data_trans(data[:,i+1], 
                 scale[(i+1)*2], scale[(i+1)*2+1], method = method)
 
-def NN_STAB_scale_back_target(data, scale, method = None):
+def scale_back_feature(data, scale):
     """
         back to target scale
     """
     n = data.shape[1]
 
-    data[:,0] = NN_STAB_data_detransformation(data[:,0], scale[0], scale[1])
+    for i in range(n):
+        data[:,i] = data_detrans(data[:,i], 
+                scale[i*2], scale[i*2+1])
+
+
+def scale_back_target(data, scale, method = None):
+    """
+        back to target scale
+    """
+    n = data.shape[1]
+
+    data[:,0] = data_detrans(data[:,0], scale[0], scale[1])
 
     for i in range(n - 1):
-        data[:,i+1] = NN_STAB_data_detransformation(data[:,i+1], 
+        data[:,i+1] = data_detrans(data[:,i+1], 
                 scale[(i+1)*2], scale[(i+1)*2+1], method = method)
 
 class PrintDot(keras.callbacks.Callback):
@@ -320,7 +208,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
                 print("    Earlystopping! Best Performance epoch %d" %(self.epoch_opt))
                 self.model.stop_training = True
 
-def NN_train_phase_envelope(train_data, test_data, 
+def train_model(train_data, test_data, 
                             hidden_layer = 1, hidden_cells = [10], batch_size = 30, 
                             epoch = 100, GL = 0.1, min_epoch = 1000, 
                             validation_split = 0.1, has_val_data = False, validation_data = None,
@@ -482,8 +370,8 @@ def train(train_data, test_data, trans = None,
     
     # testing featrue and target
     test = read_data(test_data)
-    NN_STAB_scale_feature(test['feature'], feature_scale)
-    NN_STAB_scale_target(test['target'], target_scale, method = trans)
+    scale_feature(test['feature'], feature_scale)
+    scale_target(test['target'], target_scale, method = trans)
     print "*** Number of testing examples: " + str(len(test['target']))
 
     validation = None
@@ -491,8 +379,8 @@ def train(train_data, test_data, trans = None,
     if validation_data is not None:
         validation = read_data(validation_data)
 
-        NN_STAB_scale_feature(validation['feature'], feature_scale)
-        NN_STAB_scale_target(validation['target'], target_scale, 
+        scale_feature(validation['feature'], feature_scale)
+        scale_target(validation['target'], target_scale, 
                 method = trans)
         has_val_data = True
         print "*** Number of validation examples: " + str(len(validation['target']))
@@ -506,7 +394,7 @@ def train(train_data, test_data, trans = None,
     print "*** Training begins ..."
     for i in range(train_number):
         print("============ TRAINING PROCESS: %d ============ " %(i + 1))
-        W, b, loss, pred = NN_train_phase_envelope(
+        W, b, loss, pred = train_model(
                 train, test, 
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
@@ -520,9 +408,9 @@ def train(train_data, test_data, trans = None,
             b_opt = b
             pred_opt = pred
 
-    NN_STAB_scale_back_target(test['target'], target_scale,
+    scale_back_target(test['target'], target_scale,
             method = trans)
-    NN_STAB_scale_back_target(pred_opt, target_scale,
+    scale_back_target(pred_opt, target_scale,
             method = trans)
 
     time_end = time.time()
@@ -597,11 +485,12 @@ def load_model(file_name, level):
     return model, {'feature': feature_scale, 'target': target_scale}
 
 def predict_ps(model, scale, feature, trans = None):
-    NN_STAB_scale_feature(feature, scale['feature'])
+    scale_feature(feature, scale['feature'])
 
     pred = model.predict(feature)
 
-    NN_STAB_scale_back_target(pred, scale['target'],
+    scale_back_feature(feature, scale['feature'])
+    scale_back_target(pred, scale['target'],
             method = trans)
 
     return pred
@@ -626,7 +515,7 @@ def prediction_result(z, p, pred_stab, real_stab):
     unknown = pred_stab['unknown']
 
     correct = (stable & real_stab) | (unstable & ~real_stab)
-    wrong = ~unknow & ~correct
+    wrong = ~unknown & ~correct
 
     z_correct = z[correct]
     p_correct = p[correct]
@@ -647,19 +536,19 @@ def read_stab_data(file_name):
     nc = data.shape[1]
     nr = data.shape[0]
 
-    # 3 values for "liquid", "vapor", and "unstable"
-    # 1 value for pressure
     # the rest are the composition of each component
-    ncomp = nc - 4
+    ncomp = nc - 2
     
     # feature (composition)
     z = data[:, 0:ncomp]
 
     # presure
     p = data[:, ncomp:ncomp+1]
+    p = p.reshape(p.shape[0])
 
     # target (unstable: 0, stable: 1)
-    stab = ~(data[:, (ncomp + 1):(ncomp + 2)] > 0.5)
+    stab = data[:, (ncomp + 1):(ncomp + 2)] > 0.5
+    stab = stab.reshape(stab.shape[0])
     
     return z, p, stab 
 
@@ -679,7 +568,7 @@ def stability_test(file_name, model, scale):
 
     return result
 
-def plot_prediction_ternary(result, scale = 100, multiple = 5, 
+def plot_prediction_ternary(result, scale = 100, multiple = 20, 
         plot_name = None):
 
     correct = result['correct']
@@ -691,20 +580,32 @@ def plot_prediction_ternary(result, scale = 100, multiple = 5,
 
     figure, tax = ternary.figure(scale = scale)
     #tax.set_title("Training Data", fontsize=20)
-    tax.boundary(linewidth=2.0)
+    tax.boundary(linewidth=1.0)
     tax.gridlines(multiple = multiple, color="blue")
 
     tax.left_axis_label("$C_{10}$", fontsize=fontsize)
     tax.right_axis_label("$C_{6}$", fontsize=fontsize)
     tax.bottom_axis_label("$C_{1}$", fontsize=fontsize)
 
-    correct_points = correct[0]
-    wrong_points = wrong[0]
-    unknown_points = unknown[0]
+    correct_points = correct[0] * scale
+    wrong_points = wrong[0] * scale
+    unknown_points = unknown[0] * scale
 
-    tax.scatter(correct_points, color='red', label="Correct")
-    tax.scatter(wrong_points, color='blue', label="Wrong")
-    tax.scatter(unknown_points, color='green', label="Uncertain")
+    correct_points = np.rint(correct_points)
+    correct_points = correct_points.astype(int)
+
+    wrong_points = np.rint(wrong_points)
+    wrong_points = wrong_points.astype(int)
+
+    unknown_points = np.rint(unknown_points)
+    unknown_points = unknown_points.astype(int)
+
+    if (correct_points.shape[0] > 0):
+        tax.scatter(correct_points, s = 1, color='red', label="Correct")
+    if (wrong_points.shape[0] > 0):
+        tax.scatter(wrong_points, s = 1, color='blue', label="Wrong")
+    if (unknown_points.shape[0] > 0):
+        tax.scatter(unknown_points, s = 1, color='green', label="Uncertain")
 
     tax.legend()
     tax.clear_matplotlib_ticks()
@@ -722,64 +623,4 @@ def plot_prediction_ternary(result, scale = 100, multiple = 5,
     tax.savefig(file_name)
 
     
-
-def predict(W, b, data_file, delta_p = 0.0, safeguard = 1.0, 
-        plot = True, plot_name = None):
-
-    time_begin = time.time()
-    stable, wrong_prediction, unknown_prediction, result = NN_STAB_predict_stability(W, b, 
-            data_file, delta_p = delta_p, safeguard = safeguard, 
-            plot = plot, plot_name = plot_name)
-    time_end = time.time()
-
-    print("Prediction time cost: %f seconds" %(time_end - time_begin))
-
-    return stable, wrong_prediction, unknown_prediction, result
-
-
-def plot_wrong_prediction(data_file_i, data_file_d, 
-        unknown_prediction, wrong_prediction, 
-        plot = True, plot_name = None):
-
-    feature_i, target_i = read_data(data_file_i)
-    feature_d, target_d = read_data(data_file_d)
-
-    testing_data_C = []
-    testing_data_P = []
-
-    for f, t in zip(feature_i, target_i):
-        testing_data_C.append(f[0])
-        testing_data_P.append(t[0])
-    
-    for f, t in zip(feature_d, target_d):
-        testing_data_C.append(f[0])
-        testing_data_P.append(t[0])
-
-    C_min = 0.5 * (np.amin(testing_data_C) + 0.0)
-    C_max = 0.5 * (np.amax(testing_data_C) + 1.0)
-    P_min = np.amin(testing_data_P)
-    P_max = np.amax(testing_data_P)
-    
-    plt.xlabel("Composition")
-    plt.ylabel("Pressure, atm")
-    plt.xlim((C_min, C_max))
-    plt.ylim((P_min, P_max))
-    plt.plot(testing_data_T, testing_data_P, 
-             label = 'Real saturation pressure envelope', c = 'red')
-    plt.scatter(unknown_prediction[0], unknown_prediction[1], 
-                label = 'No prediction points', c = 'blue', s = 5.0)
-    plt.scatter(wrong_prediction[0], wrong_prediction[1], 
-                label = 'Wrong prediction points', c = 'green', s = 15.0)
-    plt.legend(bbox_to_anchor = (0.05, 1.0), loc = "upper left")
-
-    output_name = None
-    
-    if plot_name is None:
-        plot_name = "ANN-STAB-prediction-wrong-unknown-points"
-        
-    output_name = plot_name + ".eps"
-    plt.savefig(output_name)
-    
-    output_name = plot_name + ".pdf"
-    plt.savefig(output_name)
 
