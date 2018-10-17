@@ -376,7 +376,7 @@ def plot_history(history):
             val_loss.append(vl)
 
     plt.plot(epoch, loss, label='Train Loss')
-    plt.plot(epoch, val_loss, label='Train Loss')
+    plt.plot(epoch, val_loss, label='Validation Loss')
     plt.legend()
     plt.show()
 
@@ -530,8 +530,6 @@ def plot_test_result(target, predictions, plot_name):
         file_name = plot_name + "-" + name + ".pdf"
         plt.savefig(file_name)    
 
-
-
     error = predictions - target
 
     plt.hist(error[:,0], bins = 50)
@@ -624,10 +622,10 @@ def train(train_data, test_data, trans = None,
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
 
-    return W_opt, b_opt, loss_opt
+    return W_opt, b_opt, loss_opt, {'feature': feature_scale, 'target': target_scale}
 
 
-def NN_SPLIT_load_matrix_bias_from_file(file_name, level):
+def load_model(file_name, level):
     input_name = None
     W = [None] * level
     b = [None] * level
@@ -639,13 +637,34 @@ def NN_SPLIT_load_matrix_bias_from_file(file_name, level):
         input_name = file_name + 'b' + str(i) + '.csv'
         b[i] = np.loadtxt(input_name, delimiter=',')
         
-        dim = [1, b[i].shape[0]]
-        b[i] = b[i].reshape(dim)
-        print(b[i].shape, dim)
+    input_name = file_name + 'scale-f.csv'
+    feature_scale = np.loadtxt(input_name, delimiter=',')
 
-    return W, b
+    input_name = file_name + 'scale-t.csv'
+    target_scale = np.loadtxt(input_name, delimiter=',')
 
-def NN_SPLIT_write_matrix_bias_to_file(W, b, file_name = None):
+    nfeature = W[0].shape[0]
+    nstatus = W[level - 1].shape[1]
+
+    model = keras.Sequential()
+    model.add(keras.layers.Dense(W[0].shape[1], 
+                activation = tf.nn.softmax,
+                input_shape = (nfeature,)))
+
+    for i in range(level - 1):
+        model.add(keras.layers.Dense(W[i+1].shape[1],
+                activation = tf.nn.softmax))
+
+    model.add(keras.layers.Dense(nstatus))
+
+    i = 0
+    for layer in model.layers:
+        layer.set_weights([W[i], b[i]])
+        i = i + 1
+
+    return model, {'feature': feature_scale, 'target': target_scale}
+
+def to_file(W, b, file_name = None):
     output_name = None
     
     if file_name is None:
@@ -660,5 +679,10 @@ def NN_SPLIT_write_matrix_bias_to_file(W, b, file_name = None):
         output_name = file_name + 'b' + str(i) + '.csv'
         np.savetxt(output_name, b[i], delimiter = ',')
 
+    output_name = file_name + 'scale-f.csv'
+    np.savetxt(output_name, scale['feature'], delimiter = ',')
+
+    output_name = file_name + 'scale-t.csv'
+    np.savetxt(output_name, scale['target'], delimiter = ',')
 
 

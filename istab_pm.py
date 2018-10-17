@@ -1,4 +1,5 @@
 import pandas as pd
+import ternary
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -6,7 +7,7 @@ from tensorflow import keras
 import time
 import math
 
-def NN_STAB_data_generation(data_file, rescaling = False, 
+def read_data(data_file, rescaling = False, 
         feature_scale = None, target_scale = None,
         skip_header = 1):
 
@@ -103,7 +104,7 @@ def NN_STAB_predict_saturation_pressure(W, b, feature = None, target = None,
         if data_file is None:
             return
         else:
-            feature, target = NN_STAB_data_generation(data_file, 
+            feature, target = read_data(data_file, 
                     for_training = False)
     
     #print(target[0:100])
@@ -280,6 +281,8 @@ def plot_history(history):
             loss.append(l)
             val_loss.append(vl)
 
+    plt.plot(epoch, loss, label='Train Loss')
+    plt.plot(epoch, val_loss, label='Validation Loss')
     plt.legend()
     plt.show()
 
@@ -472,13 +475,13 @@ def train(train_data, test_data, trans = None,
     # training featrue and target
     feature_scale = []
     target_scale = []
-    train = NN_STAB_data_generation(train_data, rescaling = True, 
+    train = read_data(train_data, rescaling = True, 
             feature_scale = feature_scale,
             target_scale = target_scale)
     print "*** Number of training examples: " + str(len(train['target']))
     
     # testing featrue and target
-    test = NN_STAB_data_generation(test_data)
+    test = read_data(test_data)
     NN_STAB_scale_feature(test['feature'], feature_scale)
     NN_STAB_scale_target(test['target'], target_scale, method = trans)
     print "*** Number of testing examples: " + str(len(test['target']))
@@ -486,7 +489,7 @@ def train(train_data, test_data, trans = None,
     validation = None
     has_val_data = False
     if validation_data is not None:
-        validation = NN_STAB_data_generation(validation_data)
+        validation = read_data(validation_data)
 
         NN_STAB_scale_feature(validation['feature'], feature_scale)
         NN_STAB_scale_target(validation['target'], target_scale, 
@@ -528,12 +531,11 @@ def train(train_data, test_data, trans = None,
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
 
-    return W_opt, b_opt, loss_opt
+    return W_opt, b_opt, loss_opt, {'feature': feature_scale, 'target': target_scale}
 
 
 
-
-def NN_STAB_write_matrix_bias_to_file(W, b, file_name = None):
+def to_file(W, b, scale, file_name = None):
     output_name = None
     
     if file_name is None:
@@ -548,213 +550,14 @@ def NN_STAB_write_matrix_bias_to_file(W, b, file_name = None):
         output_name = file_name + 'b' + str(i) + '.csv'
         np.savetxt(output_name, b[i], delimiter = ',')
 
+    output_name = file_name + 'scale-f.csv'
+    np.savetxt(output_name, scale['feature'], delimiter = ',')
 
-def write(W, b, file_name = None):
-    NN_STAB_write_matrix_bias_to_file(W, b, file_name = file_name)
-
-
-def NN_STAB_ajoint_prediction(pred_i, pred_d, 
-                              plot_model_real = [True, True],
-                              plot_set = None, plot_name = None):    
-    ncomp = len(pred_i[0][0]) - 1
-    
-    # collect predicted upper saturation pressure
-    feature = pred_i[0]
-    pred = pred_i[2] 
-    composition_i = []
-    pred_pressure_i = []
-    count = -1
-    last_value =1.0e10
-    last_X = [1.1] * ncomp
-    X = [None] * ncomp
-    
-    for f, p in zip(feature, pred): 
-        flag = False
-        for i in range(ncomp):
-            X[i] = f[i]
-            
-        if X[0] < last_X[0]:
-            flag = True
-                
-        if flag:
-            composition_i.append([])
-            pred_pressure_i.append([])
-            count += 1
-        
-        composition_i[count].append(f[0])
-        pred_pressure_i[count].append(p)
-        last_value = f[0]
-        
-        for i in range(ncomp):
-            last_X[i] = X[i]
-            
-    Nset = len(composition_i)
-    
-    # collect predicted down saturation pressure
-    feature = pred_d[0]
-    pred = pred_d[2] 
-    composition_d = []
-    pred_pressure_d = []
-    count = -1
-    last_value = 0.0
-    last_X = [0.0] * ncomp
-    X = [None] * ncomp
-    
-    for f, p in zip(feature, pred):   
-        flag = False
-        for i in range(ncomp):
-            X[i] = f[i]
-
-        if X[0] > last_X[0]:
-            flag = True
-                
-        #if flag:
-        #    print(X)
-                
-        if flag:
-            composition_d.append([])
-            pred_pressure_d.append([])
-            count += 1
-        
-        composition_d[count].append(f[0])
-        pred_pressure_d[count].append(p)
-        last_value = f[0]
-        
-        for i in range(ncomp):
-            last_X[i] = X[i]
-    
-    
-    # ajoint the composition
-    composition = []
-    count = 0
-    for t_i, t_d in zip(composition_i, composition_d):
-        composition.append([])
-        
-        for i in range(len(t_i)):
-            composition[count].append(t_i[i])
-        for i in range(len(t_d)):
-            composition[count].append(t_d[i])
-        
-        count += 1
-    
-
-    # ajoint the predicted pressure
-    pred_pressure = []
-    count = 0
-    for p_i, p_d in zip(pred_pressure_i, pred_pressure_d):
-        pred_pressure.append([])
-        
-        for i in range(len(p_i)):
-            pred_pressure[count].append(p_i[i])
-        for i in range(len(p_d)):
-            pred_pressure[count].append(p_d[i])
-        
-        count += 1
-    
-    
-    real_pressure_i = None
-    target = pred_i[1]
-    if target is not None:
-        real_pressure_i = []
-        count = -1
-        count_p = 0
-        np = -2
-        
-        for p in target:
-            if count_p >= np:
-                real_pressure_i.append([])
-                count += 1
-                
-                if count < len(composition_i):
-                    np = len(composition_i[count])
-                    
-                count_p = 0
-            
-            real_pressure_i[count].append(p)
-            count_p += 1
-   
-    real_pressure_d = None
-    target = pred_d[1]
-    if target is not None:
-        real_pressure_d = []
-        count = -1
-        count_p = 0
-        np = -2
-        
-        for p in target:
-            if count_p >= np:
-                real_pressure_d.append([])
-                count += 1
-                if count < len(composition_d):
-                    np = len(composition_d[count])
-                count_p = 0
-                
-            real_pressure_d[count].append(p)
-            count_p += 1
-    
-    real_pressure = None
-    if real_pressure_i is not None and real_pressure_d is not None:
-        real_pressure = []
-        count = 0
-        for p_i, p_d in zip(real_pressure_i, real_pressure_d):
-            real_pressure.append([])
-        
-            for i in range(len(p_i)):
-                real_pressure[count].append(p_i[i])
-            for i in range(len(p_d)):
-                real_pressure[count].append(p_d[i])
-        
-            count += 1
-    
-    print(len(composition), len(pred_pressure), len(real_pressure))
-
-    print(composition[0], pred_pressure[0], real_pressure[0])
-    plt.clf()
-    plt.xlabel("Composition")
-    plt.ylabel("Pressure, atm")
-    
-    plot_sets = []
-    if plot_set is None:
-        for i in range(Nset):
-            plot_sets.append(i)
-    else:
-        plot_sets = plot_set
-        
-    if plot_model_real[0]:        
-        for i, set_no in enumerate(plot_sets):
-            if i == 0:
-                plt.plot(composition[set_no], pred_pressure[set_no],
-                         label = 'ANN-STAB Model', color = 'red')
-            else:
-                plt.plot(composition[set_no], pred_pressure[set_no], color = 'red')
-    
-    #print(composition)
-    #print(real_pressure)
-    if real_pressure is not None:
-        if plot_model_real[1]:
-            for i, set_no in enumerate(plot_sets):
-                if i == 0:
-                    plt.plot(composition[set_no], real_pressure[set_no], 
-                             label = 'Real Saturation Pressure', color = 'blue')
-                else:
-                    plt.plot(composition[set_no], real_pressure[set_no], color = 'blue')
-    
-    plt.legend(bbox_to_anchor = (0.05, 1.0), loc = "upper left")
-        
-    file_name = None
-        
-    if plot_name is None:
-        plot_name = "ANN-STAB-PM-combined"
-        
-    file_name = plot_name + ".eps"    
-    plt.savefig(file_name)
-        
-    file_name = plot_name + ".pdf"
-    plt.savefig(file_name)
+    output_name = file_name + 'scale-t.csv'
+    np.savetxt(output_name, scale['target'], delimiter = ',')
 
 
-
-def NN_STAB_load_matrix_bias_from_file(file_name, level):
+def load_model(file_name, level):
     input_name = None
     W = [None] * level
     b = [None] * level
@@ -766,21 +569,77 @@ def NN_STAB_load_matrix_bias_from_file(file_name, level):
         input_name = file_name + 'b' + str(i) + '.csv'
         b[i] = np.loadtxt(input_name, delimiter=',')
         
-        #W[i] = W[i].reshape(dim)
-        ##print(b[i].shape, dim)
-        #print(W[i])
-    dim = [W[level-1].shape[0], 1]
-    W[level-1] = W[level-1].reshape(dim)
+    input_name = file_name + 'scale-f.csv'
+    feature_scale = np.loadtxt(input_name, delimiter=',')
 
-    return W, b
+    input_name = file_name + 'scale-t.csv'
+    target_scale = np.loadtxt(input_name, delimiter=',')
 
+    nfeature = W[0].shape[0]
+    nstatus = W[level - 1].shape[1]
 
-def read(file_name, level):
-    NN_STAB_load_matrix_bias_from_file(file_name, level)
+    model = keras.Sequential()
+    model.add(keras.layers.Dense(W[0].shape[1], 
+                activation = tf.nn.softmax,
+                input_shape = (nfeature,)))
 
+    for i in range(level - 2):
+        model.add(keras.layers.Dense(W[i+1].shape[1],
+                activation = tf.nn.softmax))
 
+    model.add(keras.layers.Dense(nstatus))
 
-def NN_STAB_predict_stability_feature_target_from_data_file(file_name):
+    i = 0
+    for layer in model.layers:
+        layer.set_weights([W[i], b[i]])
+        i = i + 1
+
+    return model, {'feature': feature_scale, 'target': target_scale}
+
+def predict_ps(model, scale, feature, trans = None):
+    NN_STAB_scale_feature(feature, scale['feature'])
+
+    pred = model.predict(feature)
+
+    NN_STAB_scale_back_target(pred, scale['target'],
+            method = trans)
+
+    return pred
+
+def predict_stability(model, scale, z, p, 
+        safeguard = 0.0,
+        trans = None):
+    ps = predict_ps(model, scale, z, trans)
+
+    pu = ps[:,0]
+    pl = ps[:,1]
+
+    unknown = ((np.abs(pu - p) < safeguard) | (np.abs(pl - p) < safeguard)) & (pl < pu) 
+    unstable = (~unknown) & (pu > pl) & (p > pl) & (p < pu) & (pu > 1.0)
+    stable = ~(unknown | unstable)
+
+    return {'stable': stable, 'unstable': unstable, 'unknown': unknown}
+
+def prediction_result(z, p, pred_stab, real_stab):
+    stable = pred_stab['stable']
+    unstable = pred_stab['unstable']
+    unknown = pred_stab['unknown']
+
+    correct = (stable & real_stab) | (unstable & ~real_stab)
+    wrong = ~unknow & ~correct
+
+    z_correct = z[correct]
+    p_correct = p[correct]
+
+    z_wrong = z[wrong]
+    p_wrong = p[wrong]
+
+    z_unknown = z[unknown]
+    p_unknown = p[unknown]
+
+    return {'correct': [z_correct, p_correct], 'wrong': [z_wrong, p_wrong], 'unknown': [z_unknown, p_unknown]} 
+
+def read_stab_data(file_name):
 
     data = np.genfromtxt(file_name, delimiter=',', 
             skip_header = False)
@@ -794,103 +653,75 @@ def NN_STAB_predict_stability_feature_target_from_data_file(file_name):
     ncomp = nc - 4
     
     # feature (composition)
-    feature = data[:, 0:ncomp]
+    z = data[:, 0:ncomp]
 
     # presure
-    pressure = data[:, ncomp:ncomp+1]
-
-    # composition
-    composition = data[:, 0:1]
+    p = data[:, ncomp:ncomp+1]
 
     # target (unstable: 0, stable: 1)
-    target = ~(data[:, (ncomp + 1):(ncomp + 2)] > 0.5)
-    target = target * 1.0
+    stab = ~(data[:, (ncomp + 1):(ncomp + 2)] > 0.5)
     
-    return feature, composition, pressure, target
+    return z, p, stab 
 
 
+def stability_test(file_name, model, scale):
 
-def NN_STAB_predict_stability(W, b, data_file, 
-                              delta_p = 0.0, safeguard = 1.0, 
-                              plot = True, plot_name = None):
-   
-    # Read feature (composition, T), pressure, and target (unstable or stable) from data file
-    feature, composition, pressure, target = NN_STAB_predict_stability_feature_target_from_data_file(data_file)
-    
-    # Calculate upper saturation pressure and down saturation pressure
-    _, _, pred_pressure, _ = NN_STAB_predict_saturation_pressure(W, b, 
-                                                                feature = feature, 
-                                                                plot = False)
-    pred_pressure_u = pred_pressure[:,0]
-    pred_pressure_d = pred_pressure[:,1]
+    z, p, real_stab = read_stab_data(file_name)
 
-    unknown = ((np.abs(pred_pressure_u - pressure) < safeguard * delta_p) | (np.abs(pred_pressure_d - pressure) < safeguard * delta_p)) & (pred_pressure_d < pred_pressure_u) 
-        
-    unstable = (~unknown) & (pred_pressure_u > pred_pressure_d) & (pressure > pred_pressure_d) & (pressure < pred_pressure_u) & (pred_pressure_u > 1.0)
-    
-            
-    stable = ~(unknown | unstable)
+    pred_stab = predict_stability(model, scale, z, p, safeguard = 0.0)
 
-    unknown = unknown * 1.0
-    unstable = unstable * 1.0
-    stable = stable * 1.0
-    
-    N = len(composition)
-    C_correct = []
-    C_wrong = []
-    C_unknown = []
-    P_correct = []
-    P_wrong = []
-    P_unknown = []
-    Cu_ary = []
-    Cs_ary = []
-    Pu_ary = []
-    Ps_ary = []
+    result = prediction_result(z, p, pred_stab, real_stab)
 
-    for i in range(N):
-        if unknown[i][0] == 1.0:
-            C_unknown.append(composition[i])
-            P_unknown.append(pressure[i])
-        elif target[i] == stable[i][0]:
-            C_correct.append(composition[i])
-            P_correct.append(pressure[i])
-        else:
-            C_wrong.append(composition[i])
-            P_wrong.append(pressure[i])
-            
-    wrong_prediction = [C_wrong, P_wrong]
-    unknown_prediction = [C_unknown, P_unknown]
-    
-    if plot:
-        plt.clf()
-        plt.xlabel("Composition")
-        plt.ylabel("Pressure, atm")
-        plt.scatter(C_correct, P_correct, label= 'correct prediction', c = 'red', s = 1.0)
-        plt.scatter(C_unknown, P_unknown, label = 'no prediction', c = 'blue', s = 10.0)
-        plt.scatter(C_wrong, P_wrong, label = 'wrong prediction', c = 'green', s = 10.0)
-        
-        plt.legend(bbox_to_anchor = (0.05, 1.0), loc = "upper left")
-        
-        output_name = None
-        if plot_name is None:
-            plot_name = "ANN-STAB-PM-prediction-uniform-distributed-set"
-        
-        output_name = plot_name + ".eps"
-        plt.savefig(output_name)
-        output_name = plot_name + ".pdf" 
-        plt.savefig(output_name)
-        plt.show()
-    
-    result = []
-    result.append(len(C_unknown))
-    result.append(len(C_wrong))
-    
-    print("No prediction percentage: %f" %(float(len(C_unknown)) / float(len(target))))
-    print("Wrong prediciton: %d" %(len(C_wrong)))
-    print("Accuracy: %f" %(1.0 - float(len(C_wrong)) / float(len(target))))
-    
-    return stable, wrong_prediction, unknown_prediction, result
+    print("Correct: %d" %(len(result['correct'][0])))
+    print("Wrong: %d" %(len(result['wrong'][0])))
+    print("Uncertain: %d" %(len(result['unknown'][0])))
+    print("Accuracy: %e" %(1.0 - float(len(result['wrong'][0])) / float(len(real_stab))))
 
+    return result
+
+def plot_prediction_ternary(result, scale = 100, multiple = 5, 
+        plot_name = None):
+
+    correct = result['correct']
+    wrong = result['wrong']
+    unknown = result['unknown']
+
+    fontsize = 12
+    axis_fontsize = 8
+
+    figure, tax = ternary.figure(scale = scale)
+    #tax.set_title("Training Data", fontsize=20)
+    tax.boundary(linewidth=2.0)
+    tax.gridlines(multiple = multiple, color="blue")
+
+    tax.left_axis_label("$C_{10}$", fontsize=fontsize)
+    tax.right_axis_label("$C_{6}$", fontsize=fontsize)
+    tax.bottom_axis_label("$C_{1}$", fontsize=fontsize)
+
+    correct_points = correct[0]
+    wrong_points = wrong[0]
+    unknown_points = unknown[0]
+
+    tax.scatter(correct_points, color='red', label="Correct")
+    tax.scatter(wrong_points, color='blue', label="Wrong")
+    tax.scatter(unknown_points, color='green', label="Uncertain")
+
+    tax.legend()
+    tax.clear_matplotlib_ticks()
+    tax.ticks(axis='lbr', linewidth=1, multiple=multiple, fontsize = 8)
+    tax._redraw_labels()
+    for spine in plt.gca().spines.values():
+        spine.set_visible(False)
+
+    if plot_name is None:
+        plot_name = 'stab-prediction-result'
+
+    file_name = plot_name + '.eps'
+    tax.savefig(file_name)
+    file_name = plot_name + '.pdf'
+    tax.savefig(file_name)
+
+    
 
 def predict(W, b, data_file, delta_p = 0.0, safeguard = 1.0, 
         plot = True, plot_name = None):
@@ -910,8 +741,8 @@ def plot_wrong_prediction(data_file_i, data_file_d,
         unknown_prediction, wrong_prediction, 
         plot = True, plot_name = None):
 
-    feature_i, target_i = NN_STAB_data_generation(data_file_i)
-    feature_d, target_d = NN_STAB_data_generation(data_file_d)
+    feature_i, target_i = read_data(data_file_i)
+    feature_d, target_d = read_data(data_file_d)
 
     testing_data_C = []
     testing_data_P = []
