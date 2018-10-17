@@ -7,6 +7,38 @@ from tensorflow import keras
 import time
 import math
 
+class ANN_STAB:
+    """
+        ANN model for stability test
+    """
+    def __init__(self, W = None, b = None, scale = None, 
+            file_name = None, level = 0):
+        if W is not None and b is not None and scale is not None:
+            self.W = W
+            self.b = b
+            self.scale = scale
+        elif file_name is not None and level > 0:
+            self.W, self.b, self.scale = read_weights_from_file(file_name, level)
+
+        self.model = load_model(self.W, self.b)
+        self.pred = None
+
+    def store_model(self, file_name):
+        to_file(self.W, self.b, self.scale, file_name)
+
+
+    def stab_test(self, file_name):
+        self.pred = stability_test(file_name, self.model, self.scale)
+
+        return self.pred
+
+    def plot(self, plot_name = None):
+        if self.pred is not None:
+            plot_prediction_ternary(self.pred, plot_name = plot_name)
+        
+
+
+
 def read_data(data_file, rescaling = False, 
         feature_scale = None, target_scale = None,
         skip_header = 1):
@@ -419,7 +451,7 @@ def train(train_data, test_data, trans = None,
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
 
-    return W_opt, b_opt, loss_opt, {'feature': feature_scale, 'target': target_scale}
+    return ANN_STAB(W = W_opt, b = b_opt, scale = {'feature': feature_scale, 'target': target_scale})
 
 
 
@@ -444,8 +476,7 @@ def to_file(W, b, scale, file_name = None):
     output_name = file_name + 'scale-t.csv'
     np.savetxt(output_name, scale['target'], delimiter = ',')
 
-
-def load_model(file_name, level):
+def read_weights_from_file(file_name, level):
     input_name = None
     W = [None] * level
     b = [None] * level
@@ -462,6 +493,12 @@ def load_model(file_name, level):
 
     input_name = file_name + 'scale-t.csv'
     target_scale = np.loadtxt(input_name, delimiter=',')
+
+    return W, b, {'feature': feature_scale, 'target': target_scale}
+
+def load_model(W, b):
+
+    level = len(W)
 
     nfeature = W[0].shape[0]
     nstatus = W[level - 1].shape[1]
@@ -482,7 +519,8 @@ def load_model(file_name, level):
         layer.set_weights([W[i], b[i]])
         i = i + 1
 
-    return model, {'feature': feature_scale, 'target': target_scale}
+    return model
+
 
 def predict_ps(model, scale, feature, trans = None):
     scale_feature(feature, scale['feature'])
