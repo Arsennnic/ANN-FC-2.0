@@ -10,7 +10,38 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
 
-def NN_SPLIT_data_generation(data_file, scale = False, 
+class ANN_SPLIT:
+    """
+        ANN model for split calculation
+    """
+    def __init__(self, W = None, b = None, scale = None, 
+            file_name = None, level = 0):
+        if W is not None and b is not None and scale is not None:
+            self.W = W
+            self.b = b
+            self.scale = scale
+        elif file_name is not None and level > 0:
+            self.W, self.b, self.scale = read_weights_from_file(file_name, level)
+
+        self.model = load_model(self.W, self.b)
+        self.comp = None
+
+    def store_model(self, file_name):
+        to_file(self.W, self.b, self.scale, file_name)
+
+    def predict(self, feature):
+        pred = predict_split(self.model, self.scale, feature)
+
+        return pred
+
+    def split_test(self, file_name):
+        self.comp = compare_prediction(file_name, self.model, self.scale)
+
+    def plot(self, plot_name = None):
+        if self.comp is not None:
+            plot_test_result(self.comp['target'], self.comp['prediction'], plot_name)
+
+def read_data(data_file, scale = False, 
         feature_scale = None, target_scale = None, 
         skip_header = 0, trans = None):
 
@@ -57,10 +88,10 @@ def NN_SPLIT_data_generation(data_file, scale = False,
                 target_scale.append(max_v)
 
             if i == 0:
-                target[:,i] = NN_SPLIT_data_transformation(target[:,i], 
+                target[:,i] = data_trans(target[:,i], 
                         min_v, max_v)
             else:
-                target[:,i] = NN_SPLIT_data_transformation(target[:,i], 
+                target[:,i] = data_trans(target[:,i], 
                         min_v, max_v, method = trans)
 
         nc = feature.shape[1]
@@ -74,13 +105,13 @@ def NN_SPLIT_data_generation(data_file, scale = False,
                 feature_scale.append(min_v)
                 feature_scale.append(max_v)
 
-            feature[:,i] = NN_SPLIT_data_transformation(feature[:,i], 
+            feature[:,i] = data_trans(feature[:,i], 
                         min_v, max_v)
 
     return {'feature': feature, 'target': target}
 
 
-def NN_SPLIT_data_transformation(data, data_min, data_max, 
+def data_trans(data, data_min, data_max, 
         method = None):
     """
         1. Default: min-max 
@@ -100,7 +131,7 @@ def NN_SPLIT_data_transformation(data, data_min, data_max,
 
 
 
-def NN_SPLIT_data_detransformation(data, data_min, data_max,
+def data_detrans(data, data_min, data_max,
         method = None):
     """
         1. Default: min-max
@@ -119,244 +150,40 @@ def NN_SPLIT_data_detransformation(data, data_min, data_max,
     return data
 
 
-def NN_SPLIT_scale_target(data, scale, method = None):
+def scale_target(data, scale, method = None):
     """
         target scale
     """
     n = data.shape[1]
 
-    data[:,0] = NN_SPLIT_data_transformation(data[:,0], scale[0], scale[1])
+    data[:,0] = data_trans(data[:,0], scale[0], scale[1])
 
     for i in range(n - 1):
-        data[:,i+1] = NN_SPLIT_data_transformation(data[:,i+1], 
+        data[:,i+1] = data_trans(data[:,i+1], 
                 scale[(i+1)*2], scale[(i+1)*2+1], method = method)
 
-def NN_SPLIT_scale_back_target(data, scale, method = None):
+def scale_back_target(data, scale, method = None):
     """
         back to target scale
     """
     n = data.shape[1]
 
-    data[:,0] = NN_SPLIT_data_detransformation(data[:,0], scale[0], scale[1])
+    data[:,0] = data_detrans(data[:,0], scale[0], scale[1])
 
     for i in range(n - 1):
-        data[:,i+1] = NN_SPLIT_data_detransformation(data[:,i+1], 
+        data[:,i+1] = data_detrans(data[:,i+1], 
                 scale[(i+1)*2], scale[(i+1)*2+1], method = method)
 
 
-
-def NN_SPLIT_convert_data(data_file, feature, target, pred, fit = 'Fv'):
-    data = pd.read_csv(data_file)
-    
-    nc = data.shape[1]
-    nr = data.shape[0]
-    
-    ncomp = int((nc - 3) / 2)
-
-    X = []
-    Y = []
-    Z_target = []
-    Z_pred = []
-    
-    count = 0
-    for i in range(nr):
-        flag = False
-        
-        if fit is 'Fv':
-            Fv = data['Fv'][i]
-            if Fv >= 0.9999 or Fv <= 0.0001:
-                
-                if_insert = True
-                for aa in Y:
-                    if (np.fabs(data['Pressure'][i] - aa) < 1e-4):
-                        if_insert = False
-
-                if if_insert:
-                    Y.append(data['Pressure'][i])
-
-                if_insert = True
-                for aa in X:
-                    if (np.fabs(data['Component 1'][i] - aa) < 1e-4):
-                        if_insert = False
-
-                if if_insert:
-                    X.append(data['Component 1'][i])
-
-                
-                #if data['Pressure'][i] not in Y:
-                #    Y.append(data['Pressure'][i])
-            
-                #if data['Component 1'][i] not in X:
-                #    X.append(data['Component 1'][i])
-                
-                flag = True 
-        else:
-            K = data[fit][i]
-            
-            if K <= 1e-15:
-                if_insert = True
-                for aa in Y:
-                    if (np.fabs(data['Pressure'][i] - aa) < 1e-4):
-                        if_insert = False
-
-                if if_insert:
-                    Y.append(data['Pressure'][i])
-
-                if_insert = True
-                for aa in X:
-                    if (np.fabs(data['Component 1'][i] - aa) < 1e-4):
-                        if_insert = False
-
-                if if_insert:
-                    X.append(data['Component 1'][i])
-
-                #if data['Pressure'][i] not in Y:
-                #    Y.append(data['Pressure'][i])
-            
-                #if data['Component 1'][i] not in X:
-                #    X.append(data['Component 1'][i])
-                
-                flag = True
-        
-        f = feature[count]
-        t = target[count]
-        p = pred[count]
-        
-        if_insert = True
-        for aa in X:
-            if (np.fabs(f[0] - aa) < 1e-4):
-                if_insert = False
-
-        if if_insert:
-            X.append(f[0])
-
-        if_insert = True
-        for aa in Y:
-            if (np.fabs(f[-1] - aa) < 1e-4):
-                if_insert = False
-
-        if if_insert:
-            Y.append(f[-1])
-
-        #if f[0] not in X:
-        #    X.append(f[0])
-        #if f[-1] not in Y:
-        #    Y.append(f[-1])
-        
-        #print(X,Y)
-
-        if flag:
-            Z_target.append(-1.0)
-            Z_pred.append(-1.0) 
-        else:  
-            Z_target.append(t)
-            Z_pred.append(p)
-        
-        count += 1
-  
-    dim = [len(Y), len(X)]
-    
-    #print(X, Y)
-    #print(np.array(Z_target).reshape(dim), np.array(Z_pred).reshape(dim))
-    
-    return np.array(X), np.array(Y), np.array(Z_target).reshape(dim), np.array(Z_pred).reshape(dim)
-
-
-# In[11]:
-
-
-def NN_SPLIT_scale_feature(data, scale):
+def scale_feature(data, scale):
     """
         scale feature: min-max
     """
     n = data.shape[1]
 
     for i in range(n):
-        data[:,i] = NN_SPLIT_data_transformation(data[:,i], 
+        data[:,i] = data_trans(data[:,i], 
                 scale[i*2], scale[i*2+1])
-
-
-def NN_SPLIT_plot(data_file, feature, target, prediction, 
-                  fit = 'Fv', plot_name = None):
-    
-    C_list, P_list, value_target, value_pred = NN_SPLIT_convert_data(data_file, feature, 
-                                                                     target, prediction, 
-                                                                     fit = fit)
-    C_min = np.amin(C_list)
-    C_max = np.amax(C_list)
-    P_min = np.amin(P_list)
-    P_max = np.amax(P_list)
-    
-    if fit is 'Fv':
-        value_target = np.ma.masked_outside(value_target, 0.0001, 0.9999)
-        value_pred = np.ma.masked_outside(value_pred, 0.0001, 0.9999)
-    else:
-        log_target = np.log(value_target)
-        log_pred = np.log(value_pred)
-        value_target = np.ma.masked_inside(log_target, 0.0, 1e-7)
-        value_pred = np.ma.masked_inside(log_target, 0.0, 1e-7)
-    
-    #print(Fv_target)
-    #print(value_pred)  
-    
-    file_name = None
-        
-    if plot_name is None:
-        plot_name = "ANN-SPLIT-PM-phase"
-    
-    fig, ax = plt.subplots() 
-    im = NonUniformImage(ax, extent=(C_min, C_max, P_min, P_max))
-    im.set_cmap("jet")
-    im.set_data(C_list, P_list, value_target)
-    ax.images.append(im)
-    ax.set_xlim(C_min, C_max)
-    ax.set_ylim(P_min, P_max)
-    ax.set_xlabel("Composition")
-    ax.set_ylabel("Pressure, atm")
-    #ax.set_title("Flash Calculation")
-    fig.colorbar(im, ax = ax)
-    
-    file_name = plot_name + "-target" + ".eps"    
-    plt.savefig(file_name)    
-    file_name = plot_name + "-target" + ".pdf"
-    plt.savefig(file_name)
-    plt.show()
-    
-    fig, ax = plt.subplots()   
-    im = NonUniformImage(ax, extent=(C_min, C_max, P_min, P_max))
-    im.set_cmap("jet")
-    im.set_data(C_list, P_list, value_pred)
-    ax.images.append(im)
-    ax.set_xlim(C_min, C_max)
-    ax.set_ylim(P_min, P_max)
-    ax.set_xlabel("Composition")
-    ax.set_ylabel("Pressure, atm")
-    #ax2.set_title("Flash Calculation")
-    fig.colorbar(im, ax = ax)
-    
-    file_name = plot_name + "-pred" + ".eps"    
-    plt.savefig(file_name)    
-    file_name = plot_name + "-pred" + ".pdf"
-    plt.savefig(file_name)
-    plt.show()
-    
-    fig, ax = plt.subplots()   
-    im = NonUniformImage(ax, extent=(C_min, C_max, P_min, P_max))
-    im.set_cmap("jet")
-    im.set_data(C_list, P_list, (value_target - value_pred))
-    ax.images.append(im)
-    ax.set_xlim(C_min, C_max)
-    ax.set_ylim(P_min, P_max)
-    ax.set_xlabel("Composition")
-    ax.set_ylabel("Pressure, atm")
-    #ax3.set_title("Flash Calculation")
-    fig.colorbar(im, ax = ax)
-    
-    file_name = plot_name + "-error" + ".eps"    
-    plt.savefig(file_name)    
-    file_name = plot_name + "-error" + ".pdf"
-    plt.savefig(file_name)
-    plt.show()
 
 
 def plot_history(history):
@@ -416,7 +243,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
                 self.model.stop_training = True
         
 
-def NN_train_phase_split_calculation(train_data, test_data, 
+def train_model(train_data, test_data, 
                                      hidden_layer = 1, hidden_cells = [10], 
                                      batch_size = 30, epoch = 100, 
                                      validation_split = 0.1, has_val_data = False, validation_data = None,
@@ -564,7 +391,7 @@ def train(train_data, test_data, trans = None,
     # training featrue and target
     feature_scale = []
     target_scale = []
-    train = NN_SPLIT_data_generation(train_data, scale = True, 
+    train = read_data(train_data, scale = True, 
                                                 feature_scale = feature_scale,
                                                 target_scale = target_scale,
                                                 trans = trans)
@@ -572,20 +399,18 @@ def train(train_data, test_data, trans = None,
     print "*** Number of training examples: " + str(len(train['target']))
     
     # testing featrue and target
-    test = NN_SPLIT_data_generation(test_data, 
-            scale = False, skip_header = 1)
-    NN_SPLIT_scale_feature(test['feature'], feature_scale)
-    NN_SPLIT_scale_target(test['target'], target_scale, method = trans)
+    test = read_data(test_data)
+    scale_feature(test['feature'], feature_scale)
+    scale_target(test['target'], target_scale, method = trans)
     print "*** Number of testing examples: " + str(len(test['target']))
 
     validation = None
     has_val_data = False
     if validation_data is not None:
-        validation = NN_SPLIT_data_generation(validation_data,
-                scale = False, skip_header = 1)
+        validation = read_data(validation_data)
 
-        NN_SPLIT_scale_feature(validation['feature'], feature_scale)
-        NN_SPLIT_scale_target(validation['target'], target_scale, 
+        scale_feature(validation['feature'], feature_scale)
+        scale_target(validation['target'], target_scale, 
                 method = trans)
         has_val_data = True
         print "*** Number of validation examples: " + str(len(validation['target']))
@@ -598,7 +423,7 @@ def train(train_data, test_data, trans = None,
     print "*** Training begins ..."
     for i in range(train_number):
         print("============ TRAINING PROCESS: %d ============ " %(i + 1))
-        W, b, loss, pred = NN_train_phase_split_calculation(
+        W, b, loss, pred = train_model(
                 train, test, 
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
@@ -611,9 +436,9 @@ def train(train_data, test_data, trans = None,
             b_opt = b
             pred_opt = pred
 
-    NN_SPLIT_scale_back_target(test['target'], target_scale,
+    scale_back_target(test['target'], target_scale,
             method = trans)
-    NN_SPLIT_scale_back_target(pred_opt, target_scale,
+    scale_back_target(pred_opt, target_scale,
             method = trans)
 
     time_end = time.time()
@@ -622,10 +447,10 @@ def train(train_data, test_data, trans = None,
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
 
-    return W_opt, b_opt, loss_opt, {'feature': feature_scale, 'target': target_scale}
+    return ANN_SPLIT(W = W_opt, b = b_opt, scale = {'feature': feature_scale, 'target': target_scale})
 
 
-def load_model(file_name, level):
+def read_weights_from_file(file_name, level):
     input_name = None
     W = [None] * level
     b = [None] * level
@@ -642,6 +467,10 @@ def load_model(file_name, level):
 
     input_name = file_name + 'scale-t.csv'
     target_scale = np.loadtxt(input_name, delimiter=',')
+
+    return W, b, {'feature': feature_scale, 'target': target_scale}
+
+def load_model(W, b):
 
     nfeature = W[0].shape[0]
     nstatus = W[level - 1].shape[1]
@@ -662,7 +491,7 @@ def load_model(file_name, level):
         layer.set_weights([W[i], b[i]])
         i = i + 1
 
-    return model, {'feature': feature_scale, 'target': target_scale}
+    return model
 
 def to_file(W, b, file_name = None):
     output_name = None
@@ -684,5 +513,38 @@ def to_file(W, b, file_name = None):
 
     output_name = file_name + 'scale-t.csv'
     np.savetxt(output_name, scale['target'], delimiter = ',')
+
+def predict_split(model, scale, feature, trans = None):
+    scale_feature(feature, scale['feature'])
+
+    pred = model.predict(feature)
+
+    scale_back_feature(feature, scale['feature'])
+    scale_back_target(pred, scale['target'],
+            method = trans)
+
+    return pred
+
+def compare_prediction(file_name, model, scale):
+    data = read_data(file_name)
+
+    pred = predict_split(model, scale, data['feature'])
+    target = data['target']
+
+    diff = pred - target
+
+    return {'target': target, 'prediction': pred, 'difference': diff}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
