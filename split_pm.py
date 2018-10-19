@@ -39,7 +39,9 @@ class ANN_SPLIT:
 
     def plot(self, plot_name = None):
         if self.comp is not None:
-            plot_test_result(self.comp['target'], self.comp['prediction'], plot_name)
+            plot_test_result(self.comp['target'], 
+                    self.comp['prediction'], plot_name)
+
 
 def read_data(data_file, scale = False, 
         feature_scale = None, target_scale = None, 
@@ -185,6 +187,16 @@ def scale_feature(data, scale):
         data[:,i] = data_trans(data[:,i], 
                 scale[i*2], scale[i*2+1])
 
+def scale_back_feature(data, scale):
+    """
+        back to feature scale
+    """
+    n = data.shape[1]
+
+    for i in range(n):
+        data[:,i] = data_detrans(data[:,i], 
+                scale[i*2], scale[i*2+1])
+
 
 def plot_history(history):
     plt.figure()
@@ -206,6 +218,8 @@ def plot_history(history):
     plt.plot(epoch, val_loss, label='Validation Loss')
     plt.legend()
     plt.show()
+
+    return [epoch, loss, val_loss]
 
 
 class EarlyStoppingByGL(keras.callbacks.Callback):
@@ -297,7 +311,7 @@ def train_model(train_data, test_data,
                 epochs = epoch, validation_split=validation_split, verbose=0,
                 callbacks = [earlystop, checkpoint])
 
-    plot_history(history)
+    loss_history = plot_history(history)
 
     #model = keras.models.load_model(filepath)
     model.load_weights(filepath)
@@ -315,7 +329,7 @@ def train_model(train_data, test_data,
 
     test_predictions = model.predict(feature_test)
 
-    return W, b, loss, test_predictions
+    return W, b, loss, test_predictions, loss_history
 
 def plot_test_result(target, predictions, plot_name):
     target_min = target.min(axis=0)
@@ -416,6 +430,7 @@ def train(train_data, test_data, trans = None,
         print "*** Number of validation examples: " + str(len(validation['target']))
 
     loss_opt = 1.0;
+    loss_history_opt = None
     W_opt = None
     b_opt = None
     pred_opt = None
@@ -423,7 +438,7 @@ def train(train_data, test_data, trans = None,
     print "*** Training begins ..."
     for i in range(train_number):
         print("============ TRAINING PROCESS: %d ============ " %(i + 1))
-        W, b, loss, pred = train_model(
+        W, b, loss, pred, loss_history = train_model(
                 train, test, 
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
@@ -435,6 +450,7 @@ def train(train_data, test_data, trans = None,
             W_opt = W
             b_opt = b
             pred_opt = pred
+            loss_history_opt = loss_history
 
     scale_back_target(test['target'], target_scale,
             method = trans)
@@ -447,6 +463,22 @@ def train(train_data, test_data, trans = None,
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
 
+    if (plot):
+        plt.figure()
+        plt.xlabel('Epoch')
+        plt.yscale('log')
+        plt.ylabel('Loss')
+        plt.plot(loss_history_opt[0], loss_history_opt[1], label='Train Loss')
+        plt.plot(loss_history_opt[0], loss_history_opt[2], label='Validation Loss')
+        plt.legend()
+        plt.show()
+
+        file_name = plot_name + "-loss.eps"
+        plt.savefig(file_name)    
+        file_name = plot_name + "-loss.pdf"
+        plt.savefig(file_name)    
+
+
     return ANN_SPLIT(W = W_opt, b = b_opt, scale = {'feature': feature_scale, 'target': target_scale})
 
 
@@ -456,21 +488,23 @@ def read_weights_from_file(file_name, level):
     b = [None] * level
     
     for i in range(level):
-        input_name = file_name + 'W' + str(i) + '.csv'
+        input_name = file_name + '-W' + str(i) + '.csv'
         W[i] = np.loadtxt(input_name, delimiter=',')
         
-        input_name = file_name + 'b' + str(i) + '.csv'
+        input_name = file_name + '-b' + str(i) + '.csv'
         b[i] = np.loadtxt(input_name, delimiter=',')
         
-    input_name = file_name + 'scale-f.csv'
+    input_name = file_name + '-scale-f.csv'
     feature_scale = np.loadtxt(input_name, delimiter=',')
 
-    input_name = file_name + 'scale-t.csv'
+    input_name = file_name + '-scale-t.csv'
     target_scale = np.loadtxt(input_name, delimiter=',')
 
     return W, b, {'feature': feature_scale, 'target': target_scale}
 
 def load_model(W, b):
+
+    level = len(W)
 
     nfeature = W[0].shape[0]
     nstatus = W[level - 1].shape[1]
@@ -480,7 +514,7 @@ def load_model(W, b):
                 activation = tf.nn.softmax,
                 input_shape = (nfeature,)))
 
-    for i in range(level - 1):
+    for i in range(level - 2):
         model.add(keras.layers.Dense(W[i+1].shape[1],
                 activation = tf.nn.softmax))
 
@@ -502,16 +536,16 @@ def to_file(W, b, file_name = None):
     level = len(W)
     
     for i in range(level):
-        output_name = file_name + 'W' + str(i) + '.csv'
+        output_name = file_name + '-W' + str(i) + '.csv'
         np.savetxt(output_name, W[i], delimiter = ',')
         
-        output_name = file_name + 'b' + str(i) + '.csv'
-        np.savetxt(output_name, b[i], delimiter = ',')
+        output_name = file_name + '-b' + str(i) + '.csv'
+        np.savetxt(output_name, b[i].reshape([1, b[i].shape[0]]), delimiter = ',')
 
-    output_name = file_name + 'scale-f.csv'
+    output_name = file_name + '-scale-f.csv'
     np.savetxt(output_name, scale['feature'], delimiter = ',')
 
-    output_name = file_name + 'scale-t.csv'
+    output_name = file_name + '-scale-t.csv'
     np.savetxt(output_name, scale['target'], delimiter = ',')
 
 def predict_split(model, scale, feature, trans = None):

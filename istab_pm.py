@@ -27,8 +27,9 @@ class ANN_STAB:
         to_file(self.W, self.b, self.scale, file_name)
 
 
-    def stab_test(self, file_name):
-        self.pred = stability_test(file_name, self.model, self.scale)
+    def stab_test(self, file_name, safeguard = 0.0):
+        self.pred = stability_test(file_name, self.model, self.scale, 
+                safeguard = safeguard)
 
         return self.pred
 
@@ -186,6 +187,7 @@ class PrintDot(keras.callbacks.Callback):
 
 
 def plot_history(history):
+    plt.clf()
     plt.figure()
     plt.xlabel('Epoch')
     plt.yscale('log')
@@ -206,12 +208,15 @@ def plot_history(history):
     plt.legend()
     plt.show()
 
+    return [epoch, loss, val_loss]
+
 class EarlyStoppingByGL(keras.callbacks.Callback):
-    def __init__(self, alpha = 0.1, min_epoch = 1000, verbose=0):
+    def __init__(self, alpha = 0.1, min_epoch = 1000, epoch_strip = 100, verbose=0):
         super(keras.callbacks.Callback, self).__init__()
         self.min_val_loss = 1.0
         self.min_val_loss_batch = 1.0
         self.min_epoch = min_epoch
+        self.epoch_strip = epoch_strip
         self.verbose = verbose
         self.GL = 0.0
         self.alpha = alpha
@@ -224,25 +229,25 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
             self.min_val_loss = val_loss
             self.epoch_opt = epoch
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % self.epoch_strip == 0:
             self.min_val_loss_batch = 1.0
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % self.epoch_strip == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
             print("    Epoch %05d: MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
                     % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
-        if (epoch > self.min_epoch and (epoch + 1) % 100 == 0):
+        if (epoch > self.min_epoch and (epoch + 1) % self.epoch_strip == 0):
             if self.GL > self.alpha:
                 print("    Earlystopping! Best Performance epoch %d" %(self.epoch_opt))
                 self.model.stop_training = True
 
 def train_model(train_data, test_data, 
                             hidden_layer = 1, hidden_cells = [10], batch_size = 30, 
-                            epoch = 100, GL = 0.1, min_epoch = 1000, 
+                            epoch = 100, GL = 0.1, GL_epoch_strip = 100, min_epoch = 1000, 
                             validation_split = 0.1, has_val_data = False, validation_data = None,
                             plot = True, plot_name = None):
 
@@ -274,7 +279,8 @@ def train_model(train_data, test_data,
 
     model.compile(loss='mse', optimizer = optimizer, metrics=['mae'])
 
-    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
+    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch, 
+            epoch_strip = GL_epoch_strip)
 
     filepath = './stab_weights'
     #filepath="weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
@@ -293,7 +299,7 @@ def train_model(train_data, test_data,
                 epochs = epoch, validation_split=validation_split, verbose=0,
                 callbacks = [earlystop, checkpoint])
              
-    plot_history(history)
+    loss_history = plot_history(history)
 
     model.load_weights(filepath)
 
@@ -309,7 +315,7 @@ def train_model(train_data, test_data,
 
     test_predictions = model.predict(feature_test)
 
-    return W, b, loss, test_predictions
+    return W, b, loss, test_predictions, loss_history
 
 def plot_test_result(target, predictions, plot_name):
     target_min = target.min(axis=0)
@@ -320,17 +326,18 @@ def plot_test_result(target, predictions, plot_name):
     pu_min = np.minimum(target_min[0], pred_min[0])
     pu_max = np.maximum(target_max[0], pred_max[0])
 
+    plt.clf()
     plt.plot([pu_min, pu_max], [pu_min, pu_max], 
             lw = 2, c = 'red', zorder = 10, label = "Equal")
     plt.scatter(target[:,0], predictions[:,0], label = "Testing data")
     plt.xlabel('True Upper Saturation Pressure')
     plt.ylabel('Predictions')
     plt.legend()
-    plt.show()
     file_name = plot_name + "-Psu.eps"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     file_name = plot_name + "-Psu.pdf"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+    plt.show()
 
     filted_target = []
     filted_prediction = []
@@ -350,44 +357,47 @@ def plot_test_result(target, predictions, plot_name):
     pl_min = np.minimum(target_min, pred_min)
     pl_max = np.maximum(target_max, pred_max)
 
+    plt.clf()
     plt.plot([pl_min, pl_max], [pl_min, pl_max], 
             lw = 2, c = 'red', zorder = 10, label = "Equal")
     plt.scatter(filted_target, filted_prediction, label = "Tesing data")
     plt.xlabel('True Lower Saturation Pressure')
     plt.ylabel('Predictions')
     plt.legend()
-    plt.show()
     file_name = plot_name + "-Psl.eps"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     file_name = plot_name + "-Psl.pdf"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+    plt.show()
 
+    plt.clf()
     error_upper = predictions[:,0] - target[:,0]
     plt.hist(error_upper, bins = 50)
     plt.xlabel("Prediction Error: Upper Saturation Pressure")
     plt.ylabel("Count")
-    plt.show()
     file_name = plot_name + "-Psu-error.eps"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     file_name = plot_name + "-Psu-error.pdf"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+    plt.show()
 
+    plt.clf()
     error_lower = filted_prediction - filted_target
     plt.hist(error_lower, bins = 50)
     plt.xlabel("Prediction Error: Lower Saturation Pressure")
     plt.ylabel("Count")
-    plt.show()
     file_name = plot_name + "-Psl-error.eps"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     file_name = plot_name + "-Psl-error.pdf"
-    plt.savefig(file_name)    
+    plt.savefig(file_name, bbox_inches='tight',pad_inches=0) 
+    plt.show()
 
 
 def train(train_data, test_data, trans = None,
         hidden_layer = 1, hidden_cells = [10], 
         batch_size = 30, epoch = 100, 
         validation_split = 0.1, validation_data = None,
-        GL = 0.1, min_epoch = 1000, train_number = 10, 
+        GL = 0.1, GL_epoch_strip = 100, min_epoch = 1000, train_number = 10, 
         plot = True, plot_name = None):
 
     time_begin = time.time()
@@ -419,6 +429,7 @@ def train(train_data, test_data, trans = None,
 
 
     loss_opt = 1.0;
+    loss_history_opt = None
     W_opt = None
     b_opt = None
     pred_opt = None
@@ -426,12 +437,12 @@ def train(train_data, test_data, trans = None,
     print "*** Training begins ..."
     for i in range(train_number):
         print("============ TRAINING PROCESS: %d ============ " %(i + 1))
-        W, b, loss, pred = train_model(
+        W, b, loss, pred, loss_history = train_model(
                 train, test, 
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
                 validation_split = validation_split, has_val_data = has_val_data, validation_data = validation,
-                GL = GL, min_epoch = min_epoch,
+                GL = GL, GL_epoch_strip = GL_epoch_strip, min_epoch = min_epoch,
                 plot = plot, plot_name = plot_name)
 
         if loss < loss_opt:
@@ -439,6 +450,7 @@ def train(train_data, test_data, trans = None,
             W_opt = W
             b_opt = b
             pred_opt = pred
+            loss_history_opt = loss_history
 
     scale_back_target(test['target'], target_scale,
             method = trans)
@@ -450,6 +462,21 @@ def train(train_data, test_data, trans = None,
 
     if (plot):
         plot_test_result(test['target'], pred_opt, plot_name)
+
+    if (plot):
+        plt.clf()
+        plt.figure()
+        plt.xlabel('Epoch')
+        plt.yscale('log')
+        plt.ylabel('Loss')
+        plt.plot(loss_history_opt[0], loss_history_opt[1], label='Train Loss')
+        plt.plot(loss_history_opt[0], loss_history_opt[2], label='Validation Loss')
+        plt.legend()
+
+        file_name = plot_name + "-loss.eps"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+        file_name = plot_name + "-loss.pdf"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
 
     return ANN_STAB(W = W_opt, b = b_opt, scale = {'feature': feature_scale, 'target': target_scale})
 
@@ -464,16 +491,16 @@ def to_file(W, b, scale, file_name = None):
     level = len(W)
     
     for i in range(level):
-        output_name = file_name + 'W' + str(i) + '.csv'
+        output_name = file_name + '-W' + str(i) + '.csv'
         np.savetxt(output_name, W[i], delimiter = ',')
         
-        output_name = file_name + 'b' + str(i) + '.csv'
-        np.savetxt(output_name, b[i], delimiter = ',')
+        output_name = file_name + '-b' + str(i) + '.csv'
+        np.savetxt(output_name, b[i].reshape([1,b[i].shape[0]]), delimiter = ',')
 
-    output_name = file_name + 'scale-f.csv'
+    output_name = file_name + '-scale-f.csv'
     np.savetxt(output_name, scale['feature'], delimiter = ',')
 
-    output_name = file_name + 'scale-t.csv'
+    output_name = file_name + '-scale-t.csv'
     np.savetxt(output_name, scale['target'], delimiter = ',')
 
 def read_weights_from_file(file_name, level):
@@ -482,16 +509,16 @@ def read_weights_from_file(file_name, level):
     b = [None] * level
     
     for i in range(level):
-        input_name = file_name + 'W' + str(i) + '.csv'
+        input_name = file_name + '-W' + str(i) + '.csv'
         W[i] = np.loadtxt(input_name, delimiter=',')
         
-        input_name = file_name + 'b' + str(i) + '.csv'
+        input_name = file_name + '-b' + str(i) + '.csv'
         b[i] = np.loadtxt(input_name, delimiter=',')
         
-    input_name = file_name + 'scale-f.csv'
+    input_name = file_name + '-scale-f.csv'
     feature_scale = np.loadtxt(input_name, delimiter=',')
 
-    input_name = file_name + 'scale-t.csv'
+    input_name = file_name + '-scale-t.csv'
     target_scale = np.loadtxt(input_name, delimiter=',')
 
     return W, b, {'feature': feature_scale, 'target': target_scale}
@@ -591,11 +618,12 @@ def read_stab_data(file_name):
     return z, p, stab 
 
 
-def stability_test(file_name, model, scale):
+def stability_test(file_name, model, scale, safeguard = 0.0):
 
     z, p, real_stab = read_stab_data(file_name)
 
-    pred_stab = predict_stability(model, scale, z, p, safeguard = 0.0)
+    pred_stab = predict_stability(model, scale, 
+            z, p, safeguard = safeguard)
 
     result = prediction_result(z, p, pred_stab, real_stab)
 
