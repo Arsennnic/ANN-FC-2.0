@@ -311,7 +311,7 @@ def train_model(train_data, test_data,
 
     [loss, mae] = model.evaluate(feature_test, target_test, verbose=0)
 
-    print("    Training Loss: %1.5f, MAE: %1.5f" %(loss, mae))
+    print("    Testing Loss: %1.5f, MAE: %1.5f" %(loss, mae))
 
     test_predictions = model.predict(feature_test)
 
@@ -669,9 +669,9 @@ def plot_prediction_ternary(result, scale = 100, multiple = 20,
     if (correct_points.shape[0] > 0):
         tax.scatter(correct_points, s = 1, color='red', label="Correct")
     if (wrong_points.shape[0] > 0):
-        tax.scatter(wrong_points, s = 1, color='blue', label="Wrong")
+        tax.scatter(wrong_points, s = 3, color='blue', label="Wrong")
     if (unknown_points.shape[0] > 0):
-        tax.scatter(unknown_points, s = 1, color='green', label="Uncertain")
+        tax.scatter(unknown_points, s = 2, color='green', label="Uncertain")
 
     tax.legend()
     tax.clear_matplotlib_ticks()

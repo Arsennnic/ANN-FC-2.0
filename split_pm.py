@@ -223,11 +223,12 @@ def plot_history(history):
 
 
 class EarlyStoppingByGL(keras.callbacks.Callback):
-    def __init__(self, alpha = 0.1, min_epoch = 1000, verbose=0):
+    def __init__(self, alpha = 0.1, min_epoch = 1000, epoch_strip = 100, verbose=0):
         super(keras.callbacks.Callback, self).__init__()
         self.min_val_loss = 1.0
         self.min_val_loss_batch = 1.0
         self.min_epoch = min_epoch
+        self.epoch_strip = epoch_strip
         self.verbose = verbose
         self.GL = 0.0
         self.alpha = alpha
@@ -240,18 +241,18 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
             self.min_val_loss = val_loss
             self.epoch_opt = epoch
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % self.epoch_strip == 0:
             self.min_val_loss_batch = 1.0
 
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % self.epoch_strip == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
             print("    Epoch %05d: MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
                     % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
-        if (epoch > self.min_epoch and (epoch + 1) % 100 == 0):
+        if (epoch > self.min_epoch and (epoch + 1) % self.epoch_strip == 0):
             if self.GL > self.alpha:
                 print("    Earlystopping! Best Performance epoch %d" %(self.epoch_opt))
                 self.model.stop_training = True
@@ -261,7 +262,7 @@ def train_model(train_data, test_data,
                                      hidden_layer = 1, hidden_cells = [10], 
                                      batch_size = 30, epoch = 100, 
                                      validation_split = 0.1, has_val_data = False, validation_data = None,
-                                     GL = 0.1, min_epoch = 1000,
+                                     GL = 0.1, GL_epoch_strip = 100, min_epoch = 1000,
                                      plot = False, plot_name = None):
 
     feature = train_data['feature'] 
@@ -293,7 +294,8 @@ def train_model(train_data, test_data,
 
     model.compile(loss='mse', optimizer = optimizer, metrics=['mae'])
 
-    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch)
+    earlystop = EarlyStoppingByGL(alpha = GL, min_epoch = min_epoch,
+            epoch_strip = GL_epoch_strip)
 
     filepath = './split_weights'
     checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, 
@@ -325,7 +327,7 @@ def train_model(train_data, test_data,
     [loss, mae] = model.evaluate(feature_test, target_test, 
             verbose=0)
 
-    print("    Training Loss: %1.5f, MAE: %1.5f" %(loss, mae))
+    print("    Testing Loss: %1.5f, MAE: %1.5f" %(loss, mae))
 
     test_predictions = model.predict(feature_test)
 
@@ -342,6 +344,7 @@ def plot_test_result(target, predictions, plot_name):
 
     nstatus = target.shape[1] 
 
+    plt.clf()
     plt.plot([v_min[0], v_max[0]], [v_min[0], v_max[0]], 
             lw = 2, c = 'red', zorder = 10, label = "Equal")
     plt.scatter(target[:,0], predictions[:,0], 
@@ -349,13 +352,14 @@ def plot_test_result(target, predictions, plot_name):
     plt.xlabel('Mole Fraction')
     plt.ylabel('Predictions')
     plt.legend()
-    plt.show()
     file_name = plot_name + "-Fv.eps"
     plt.savefig(file_name)    
     file_name = plot_name + "-Fv.pdf"
     plt.savefig(file_name)    
+    plt.show()
 
     for i in range(nstatus - 1):
+        plt.clf()
         plt.plot([v_min[i+1], v_max[i+1]], [v_min[i+1], v_max[i+1]], 
                 lw = 2, c = 'red', zorder = 10, label = "Equal")
         plt.scatter(target[:,i+1], predictions[:,i+1], 
@@ -365,39 +369,41 @@ def plot_test_result(target, predictions, plot_name):
         plt.xlabel(name)
         plt.ylabel('Predictions')
         plt.legend()
-        plt.show()
         file_name = plot_name + "-" + name + ".eps"
         plt.savefig(file_name)    
         file_name = plot_name + "-" + name + ".pdf"
         plt.savefig(file_name)    
+        plt.show()
 
     error = predictions - target
 
+    plt.clf()
     plt.hist(error[:,0], bins = 50)
     plt.xlabel("Mole Fraction Prediction Error")
     plt.ylabel("Count")
-    plt.show()
     file_name = plot_name + "-Fv-error.eps"
     plt.savefig(file_name)    
     file_name = plot_name + "-Fv-error.pdf"
     plt.savefig(file_name)    
+    plt.show()
 
     for i in range(nstatus - 1):
+        plt.clf()
         plt.hist(error[:,i+1], bins = 50)
         name = 'K' + str(i+1) + ' Prediction Error'
         plt.xlabel(name)
         plt.ylabel("Count")
-        plt.show()
         file_name = plot_name + '-K' + str(i+1) + "-error.eps"
         plt.savefig(file_name)    
         file_name = plot_name + '-K' + str(i+1) + "-error.pdf"
         plt.savefig(file_name)    
+        plt.show()
     
 
 def train(train_data, test_data, trans = None,
         hidden_layer = 1, hidden_cells = [10], batch_size = 30, epoch = 100, 
         validation_split = 0.1, validation_data = None,
-        GL = 0.1, min_epoch = 1000, train_number = 10, 
+        GL = 0.1, GL_epoch_strip = 100, min_epoch = 1000, train_number = 10, 
         plot = False, plot_name = None):
 
     time_begin = time.time()
@@ -426,6 +432,7 @@ def train(train_data, test_data, trans = None,
         scale_feature(validation['feature'], feature_scale)
         scale_target(validation['target'], target_scale, 
                 method = trans)
+
         has_val_data = True
         print "*** Number of validation examples: " + str(len(validation['target']))
 
@@ -443,7 +450,7 @@ def train(train_data, test_data, trans = None,
                 hidden_layer = hidden_layer, hidden_cells = hidden_cells, 
                 batch_size = batch_size, epoch = epoch, 
                 validation_split = validation_split, has_val_data = has_val_data, validation_data = validation,
-                GL = GL, min_epoch = min_epoch, 
+                GL = GL, GL_epoch_strip = GL_epoch_strip, min_epoch = min_epoch, 
                 plot = plot, plot_name = plot_name)
         if loss < loss_opt:
             loss_opt = loss
@@ -464,6 +471,7 @@ def train(train_data, test_data, trans = None,
         plot_test_result(test['target'], pred_opt, plot_name)
 
     if (plot):
+        plt.clf()
         plt.figure()
         plt.xlabel('Epoch')
         plt.yscale('log')
@@ -471,12 +479,13 @@ def train(train_data, test_data, trans = None,
         plt.plot(loss_history_opt[0], loss_history_opt[1], label='Train Loss')
         plt.plot(loss_history_opt[0], loss_history_opt[2], label='Validation Loss')
         plt.legend()
-        plt.show()
 
         file_name = plot_name + "-loss.eps"
         plt.savefig(file_name)    
         file_name = plot_name + "-loss.pdf"
         plt.savefig(file_name)    
+
+        plt.show()
 
 
     return ANN_SPLIT(W = W_opt, b = b_opt, scale = {'feature': feature_scale, 'target': target_scale})
@@ -527,7 +536,7 @@ def load_model(W, b):
 
     return model
 
-def to_file(W, b, file_name = None):
+def to_file(W, b, scale, file_name = None):
     output_name = None
     
     if file_name is None:
