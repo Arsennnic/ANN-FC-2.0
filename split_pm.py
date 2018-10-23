@@ -42,6 +42,37 @@ class ANN_SPLIT:
             plot_test_result(self.comp['target'], 
                     self.comp['prediction'], plot_name)
 
+def get_data_scale(data):
+    scale = []
+
+    nc = data.shape[1]
+    nr = data.shape[0]
+
+    for i in range(nc):
+        max_v = data[:,i].max()
+        min_v = data[:,i].min()
+
+        scale.append(min_v)
+        scale.append(max_v)
+
+    return scale
+
+def get_data_rescale(scale1, scale2):
+    nc = len(scale1) / 2
+
+    rescale = []
+    for i in range(nc):
+        if scale1[i*2] < scale2[i*2]:
+            rescale.append(scale1[i*2])
+        else:
+            rescale.append(scale2[i*2])
+
+        if scale1[i*2+1] < scale2[i*2+1]:
+            rescale.append(scale1[i*2+1])
+        else:
+            rescale.append(scale2[i*2+1])
+
+    return rescale
 
 def read_data(data_file, scale = False, 
         feature_scale = None, target_scale = None, 
@@ -411,23 +442,33 @@ def train(train_data, test_data, trans = None,
     # training featrue and target
     feature_scale = []
     target_scale = []
-    train = read_data(train_data, scale = True, 
-                                                feature_scale = feature_scale,
-                                                target_scale = target_scale,
-                                                trans = trans)
+
+    train = read_data(train_data)
+    feature_scale_train = get_data_scale(train['feature'])
+    target_scale_train = get_data_scale(train['target'])
+
     #print(len(feature[0]), len(target), feature_scale, target_scale)
     print "*** Number of training examples: " + str(len(train['target']))
     
     # testing featrue and target
     test = read_data(test_data)
-    scale_feature(test['feature'], feature_scale)
-    scale_target(test['target'], target_scale, method = trans)
+    feature_scale_test = get_data_scale(test['feature'])
+    target_scale_test = get_data_scale(test['target'])
+
     print "*** Number of testing examples: " + str(len(test['target']))
+
+    feature_scale = get_data_rescale(feature_scale_train, feature_scale_test)
+    target_scale = get_data_rescale(target_scale_train, target_scale_test)
 
     validation = None
     has_val_data = False
     if validation_data is not None:
         validation = read_data(validation_data)
+        feature_scale_val = get_data_scale(validation['feature'])
+        target_scale_val = get_data_scale(validation['target'])
+
+        feature_scale = get_data_rescale(feature_scale, feature_scale_val)
+        target_scale = get_data_rescale(target_scale, target_scale_val)
 
         scale_feature(validation['feature'], feature_scale)
         scale_target(validation['target'], target_scale, 
@@ -435,6 +476,12 @@ def train(train_data, test_data, trans = None,
 
         has_val_data = True
         print "*** Number of validation examples: " + str(len(validation['target']))
+
+    scale_feature(train['feature'], feature_scale)
+    scale_target(train['target'], target_scale, method = trans)
+
+    scale_feature(test['feature'], feature_scale)
+    scale_target(test['target'], target_scale, method = trans)
 
     loss_opt = 1.0;
     loss_history_opt = None
