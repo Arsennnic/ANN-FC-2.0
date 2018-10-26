@@ -240,10 +240,9 @@ def plot_history(history):
     val_loss = []
 
     for e, l, vl in zip(history.epoch, history.history['loss'], history.history['val_loss']):
-        if (e > 100):
-            epoch.append(e)
-            loss.append(l)
-            val_loss.append(vl)
+        epoch.append(e)
+        loss.append(l)
+        val_loss.append(vl)
 
     plt.plot(epoch, loss, label='Train Loss')
     plt.plot(epoch, val_loss, label='Validation Loss')
@@ -272,15 +271,12 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
             self.min_val_loss = val_loss
             self.epoch_opt = epoch
 
-        if (epoch + 1) % self.epoch_strip == 0:
-            self.min_val_loss_batch = 1.0
-
         if self.min_val_loss_batch > val_loss:
             self.min_val_loss_batch = val_loss
 
         if (epoch + 1) % self.epoch_strip == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
-            print("    Epoch %05d: MGL: (%1.4f / %1.4f) - 1.0 = %1.4f" 
+            print("    Epoch %05d: MGL: (%1.6f / %1.6f) - 1.0 = %1.6f" 
                     % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
         if (epoch > self.min_epoch and (epoch + 1) % self.epoch_strip == 0):
@@ -288,6 +284,9 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
                 print("    Earlystopping! Best Performance epoch %d" %(self.epoch_opt))
                 self.model.stop_training = True
         
+        if (epoch + 1) % self.epoch_strip == 0:
+            self.min_val_loss_batch = 1.0
+
 
 def train_model(train_data, test_data, 
                                      hidden_layer = 1, hidden_cells = [10], 
@@ -321,7 +320,7 @@ def train_model(train_data, test_data,
     model.add(keras.layers.Dense(nstatus))
 
 
-    optimizer = tf.train.RMSPropOptimizer(0.001)
+    optimizer = tf.train.AdamOptimizer(0.1)
 
     model.compile(loss='mse', optimizer = optimizer, metrics=['mae'])
 
