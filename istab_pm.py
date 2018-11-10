@@ -64,6 +64,10 @@ def read_data(data_file, rescaling = False,
     feature = np.array(feature)
     target = np.array(target)
 
+    min_v = target[:,1].min()
+    if (min_v <= 1.0):
+        target = target[:,0].reshape([target.shape[0], 1])
+
     if rescaling:
         nc = target.shape[1]
         nr = target.shape[0]
@@ -233,7 +237,7 @@ class EarlyStoppingByGL(keras.callbacks.Callback):
 
         if (epoch + 1) % self.epoch_strip == 0:
             self.GL = self.min_val_loss_batch / self.min_val_loss - 1.0
-            print("    Epoch %05d: MGL: (%1.6f / %1.6f) - 1.0 = %1.4f" 
+            print("    Epoch %05d: MGL: (%1.6f / %1.6f) - 1.0 = %1.6f" 
                     % (epoch + 1, self.min_val_loss_batch, self.min_val_loss, self.GL))
 
         if (epoch > self.min_epoch and (epoch + 1) % self.epoch_strip == 0):
@@ -339,36 +343,37 @@ def plot_test_result(target, predictions, plot_name):
     plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     plt.show()
 
-    filted_target = []
-    filted_prediction = []
-    for t, p in zip(target[:,1], predictions[:,1]):
-        if t > 1.0:
-            filted_target.append(t)
-            filted_prediction.append(p)
+    if target.shape[1] > 1:
+        filted_target = []
+        filted_prediction = []
+        for t, p in zip(target[:,1], predictions[:,1]):
+            if t > 1.0:
+                filted_target.append(t)
+                filted_prediction.append(p)
 
-    filted_target = np.array(filted_target)
-    filted_prediction = np.array(filted_prediction)
+        filted_target = np.array(filted_target)
+        filted_prediction = np.array(filted_prediction)
 
-    target_min = filted_target.min()
-    target_max = filted_target.max()
-    pred_min = filted_prediction.min()
-    pred_max = filted_prediction.max()
+        target_min = filted_target.min()
+        target_max = filted_target.max()
+        pred_min = filted_prediction.min()
+        pred_max = filted_prediction.max()
 
-    pl_min = np.minimum(target_min, pred_min)
-    pl_max = np.maximum(target_max, pred_max)
+        pl_min = np.minimum(target_min, pred_min)
+        pl_max = np.maximum(target_max, pred_max)
 
-    plt.clf()
-    plt.plot([pl_min, pl_max], [pl_min, pl_max], 
+        plt.clf()
+        plt.plot([pl_min, pl_max], [pl_min, pl_max], 
             lw = 2, c = 'red', zorder = 10, label = "Equal")
-    plt.scatter(filted_target, filted_prediction, label = "Tesing data")
-    plt.xlabel('True Lower Saturation Pressure')
-    plt.ylabel('Predictions')
-    plt.legend()
-    file_name = plot_name + "-Psl.eps"
-    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
-    file_name = plot_name + "-Psl.pdf"
-    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
-    plt.show()
+        plt.scatter(filted_target, filted_prediction, label = "Tesing data")
+        plt.xlabel('True Lower Saturation Pressure')
+        plt.ylabel('Predictions')
+        plt.legend()
+        file_name = plot_name + "-Psl.eps"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+        file_name = plot_name + "-Psl.pdf"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+        plt.show()
 
     plt.clf()
     error_upper = predictions[:,0] - target[:,0]
@@ -381,16 +386,17 @@ def plot_test_result(target, predictions, plot_name):
     plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
     plt.show()
 
-    plt.clf()
-    error_lower = filted_prediction - filted_target
-    plt.hist(error_lower, bins = 50)
-    plt.xlabel("Prediction Error: Lower Saturation Pressure")
-    plt.ylabel("Count")
-    file_name = plot_name + "-Psl-error.eps"
-    plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
-    file_name = plot_name + "-Psl-error.pdf"
-    plt.savefig(file_name, bbox_inches='tight',pad_inches=0) 
-    plt.show()
+    if target.shape[1] > 1:
+        plt.clf()
+        error_lower = filted_prediction - filted_target
+        plt.hist(error_lower, bins = 50)
+        plt.xlabel("Prediction Error: Lower Saturation Pressure")
+        plt.ylabel("Count")
+        file_name = plot_name + "-Psl-error.eps"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0)    
+        file_name = plot_name + "-Psl-error.pdf"
+        plt.savefig(file_name, bbox_inches='tight',pad_inches=0) 
+        plt.show()
 
 
 def train(train_data, test_data, trans = None,

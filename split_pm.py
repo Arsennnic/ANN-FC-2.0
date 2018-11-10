@@ -101,6 +101,10 @@ def read_data(data_file, scale = False,
             if t[i + 1] < 1e-30:
                 flag = False
 
+        for f0 in f:
+            if f0 < 1e-30:
+                flag = False
+
         if flag:
             feature.append(f)
             target.append(t)
