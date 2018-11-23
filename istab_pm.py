@@ -42,7 +42,7 @@ class ANN_STAB:
 
 def read_data(data_file, rescaling = False, 
         feature_scale = None, target_scale = None,
-        skip_header = 1):
+        filt_lower = 1.0, skip_header = 1):
 
     data = np.genfromtxt(data_file, delimiter=',', skip_header = skip_header)
 
@@ -64,9 +64,10 @@ def read_data(data_file, rescaling = False,
     feature = np.array(feature)
     target = np.array(target)
 
-    min_v = target[:,1].min()
-    if (min_v <= 1.0):
-        target = target[:,0].reshape([target.shape[0], 1])
+    if target.shape[1] > 1:
+        max_v = target[:,1].max()
+        if (max_v <= filt_lower):
+            target = target[:,0].reshape([target.shape[0], 1])
 
     if rescaling:
         nc = target.shape[1]
@@ -400,6 +401,7 @@ def plot_test_result(target, predictions, plot_name):
 
 
 def train(train_data, test_data, trans = None,
+        filt_lower = 5.0,
         hidden_layer = 1, hidden_cells = [10], 
         batch_size = 30, epoch = 100, 
         validation_split = 0.1, validation_data = None,
@@ -413,11 +415,13 @@ def train(train_data, test_data, trans = None,
     target_scale = []
     train = read_data(train_data, rescaling = True, 
             feature_scale = feature_scale,
-            target_scale = target_scale)
+            target_scale = target_scale,
+            filt_lower = filt_lower)
     print "*** Number of training examples: " + str(len(train['target']))
     
     # testing featrue and target
-    test = read_data(test_data)
+    test = read_data(test_data,
+            filt_lower = filt_lower)
     scale_feature(test['feature'], feature_scale)
     scale_target(test['target'], target_scale, method = trans)
     print "*** Number of testing examples: " + str(len(test['target']))
@@ -425,7 +429,8 @@ def train(train_data, test_data, trans = None,
     validation = None
     has_val_data = False
     if validation_data is not None:
-        validation = read_data(validation_data)
+        validation = read_data(validation_data,
+            filt_lower = filt_lower)
 
         scale_feature(validation['feature'], feature_scale)
         scale_target(validation['target'], target_scale, 

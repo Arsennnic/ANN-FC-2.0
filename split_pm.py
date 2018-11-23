@@ -98,12 +98,12 @@ def read_data(data_file, scale = False,
             flag = False
 
         for i in range(ntarget - 1):
-            if t[i + 1] < 1e-30:
+            if t[i + 1] < 1e-30 or np.fabs(np.log(t[i+1])) < 1e-5:
                 flag = False
 
-        for f0 in f:
-            if f0 < 1e-30:
-                flag = False
+#for f0 in f:
+#            if f0 < 1e-30:
+#                flag = False
 
         if flag:
             feature.append(f)
